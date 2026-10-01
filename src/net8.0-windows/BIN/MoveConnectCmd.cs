@@ -6,6 +6,8 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using Autodesk.Revit.UI.Selection;
 using BIN.Common.Utils;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace BIN;
 
@@ -182,7 +184,9 @@ public class MoveConnectCmd : IExternalCommand
 
 			string successJson = BuildDiagnosticJson("CONNECTED", elem1, elem2, best);
 			message = successJson;
-			CommandDiagnostics.Write("MoveConnect", "completed", commandData, Result.Succeeded, message: successJson);
+			EmitCandidateTelemetry("succeeded", successJson);
+			// DevCommandProxy emits the one terminal L1 envelope after this command returns.
+			CommandDiagnostics.Write("MoveConnect", "detail", commandData, Result.Succeeded, message: successJson);
 			return Result.Succeeded;
 		}
 		catch (Autodesk.Revit.Exceptions.OperationCanceledException)
@@ -355,8 +359,25 @@ public class MoveConnectCmd : IExternalCommand
 			ExpandedContent = expandedContent
 		};
 		dialog.Show();
-		CommandDiagnostics.Write("MoveConnect", "failed", commandData, Result.Failed, message: diagnosticJson, error: ex);
+		EmitCandidateTelemetry("failed", diagnosticJson);
+		// DevCommandProxy emits the one terminal L1 envelope after this command returns.
+		CommandDiagnostics.Write("MoveConnect", "detail_failed", commandData, Result.Failed, message: diagnosticJson, error: ex);
 		return Result.Failed;
+	}
+
+	private static void EmitCandidateTelemetry(string outcome, string diagnosticJson)
+	{
+		try
+		{
+			JObject details = JObject.Parse(diagnosticJson);
+			string reasonCode = (string)details["reason"] ?? "UNEXPECTED_ERROR";
+			JObject target = details["target"] as JObject;
+			JObject source = details["source"] as JObject;
+			if (target != null) target.Remove("name");
+			if (source != null) source.Remove("name");
+			CommandDiagnostics.WriteL2Json("MoveConnect", outcome, reasonCode, details.ToString(Formatting.None));
+		}
+		catch { }
 	}
 
 	private static void Rollback(Transaction transaction)

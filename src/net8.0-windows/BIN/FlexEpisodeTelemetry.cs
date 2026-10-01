@@ -4,7 +4,6 @@ using System.Globalization;
 using System.Linq;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Plumbing;
-using Newtonsoft.Json;
 
 namespace BIN;
 
@@ -34,12 +33,32 @@ internal static class FlexEpisodeTelemetry
 			// This snapshot intentionally runs on the Revit command thread immediately after
 			// tFlex.Commit().  The queued callback below receives a primitive-only DTO.
 			FlexEpisodePayload episode = Capture(doc, mainPipe, completedConnections);
-			TelemetryHttpTransport.PostJsonAsync(() => JsonConvert.SerializeObject(episode, Formatting.None));
+			QueueStandardizedEpisode(episode, completedConnections);
 		}
 		catch
 		{
 			// Observability must never change the command result.
 		}
+	}
+
+	private static void QueueStandardizedEpisode(FlexEpisodePayload episode,
+		IList<FlexEpisodeConnection> completedConnections)
+	{
+		int teeCount = completedConnections.Count(connection => IsValidElementId(connection.TeeId));
+		int elbowCount = completedConnections.Count(connection => IsValidElementId(connection.ElbowId));
+		string branchStatus = teeCount > 0 ? "tee_branch" : elbowCount > 0 ? "elbow_branch" : "direct_branch";
+		CommandDiagnostics.WriteL2("ConnectSprinklerFlexPipe", "succeeded", "COMPLETED", new
+		{
+			event_kind = "sprinkler_flex_completion",
+			pipe_count = 1,
+			sprinkler_count = completedConnections.Count,
+			branch_status = branchStatus,
+			tee_count = teeCount,
+			elbow_count = elbowCount,
+			flex_pipe_count = episode.flex_pipe == null ? 0 : episode.flex_pipe.Count,
+			all_flexes_have_three_control_points = episode.validation != null && episode.validation.all_flexes_have_three_control_points,
+			endpoints_connected = episode.validation != null && episode.validation.both_ends_connected
+		});
 	}
 
 	private static FlexEpisodePayload Capture(Document doc, Pipe mainPipe,

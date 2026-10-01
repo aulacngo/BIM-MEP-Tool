@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using Autodesk.Revit.Attributes;
@@ -33,6 +34,7 @@ public abstract class DevCommandProxy : IExternalCommand
 	{
 		string className = DevCommandRegistry.Get(CommandKey);
 		string assemblyPath = null;
+		Stopwatch commandTimer = Stopwatch.StartNew();
 		try
 		{
 			if (string.IsNullOrWhiteSpace(className))
@@ -56,13 +58,15 @@ public abstract class DevCommandProxy : IExternalCommand
 
 			IExternalCommand command = (IExternalCommand)Activator.CreateInstance(commandType);
 			Result result = command.Execute(commandData, ref message, elements);
-			CommandDiagnostics.Write(className, result == Result.Failed ? "failed" : "completed", commandData, result, message, assemblyPath: assemblyPath ?? assembly.Location);
+			CommandDiagnostics.Write(className, result == Result.Failed ? "failed" : "completed", commandData, result, message,
+				assemblyPath: assemblyPath ?? assembly.Location, durationMilliseconds: commandTimer.ElapsedMilliseconds);
 			return result;
 		}
 		catch (Exception ex)
 		{
 			Exception actual = ex is TargetInvocationException invocation && invocation.InnerException != null ? invocation.InnerException : ex;
-			CommandDiagnostics.Write(className ?? CommandKey, "failed", commandData, Result.Failed, message, actual, assemblyPath);
+			CommandDiagnostics.Write(className ?? CommandKey, "failed", commandData, Result.Failed, message, actual, assemblyPath,
+				commandTimer.ElapsedMilliseconds);
 			TaskDialog.Show("BIM TOOL - " + (className ?? CommandKey), actual.Message + "\n\nChi tiết đã được ghi vào diagnostics.");
 			return Result.Cancelled;
 		}

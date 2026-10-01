@@ -562,7 +562,7 @@ public partial class ConnectSprinklerFlexPipeCmd : IExternalCommand
 		return columnByRow;
 	}
 
-	private static bool IsSprinkler(FamilyInstance familyInstance)
+	internal static bool IsSprinkler(FamilyInstance familyInstance)
 	{
 		return familyInstance?.Category != null &&
 			familyInstance.Category.GetIdInt() == (int)BuiltInCategory.OST_Sprinklers;
@@ -1365,7 +1365,29 @@ public partial class ConnectSprinklerFlexPipeCmd : IExternalCommand
 		FlexPipeDiagnostics.Write("execute", allConnected ? "succeeded" : "failed",
 			allConnected ? "All requested connections passed post-check" : log,
 			pickedPipe.Id.GetIdInt(), details: $"count={connDataList.Count}");
+		if (!allConnected)
+		{
+			CommandDiagnostics.WriteL2("ConnectSprinklerFlexPipe", "failed", ClassifyFlexFailure(log), new
+			{
+				event_kind = "sprinkler_flex_completion",
+				pipe_count = 1,
+				sprinkler_count = connDataList.Count,
+				connected_count = completedConnections.Count,
+				branch_status = connDataList.Any(data => data.isExistingBranch) ? "existing_branch" : "tee_branch"
+			});
+		}
 		return allConnected;
+	}
+
+	internal static string ClassifyFlexFailure(string detail)
+	{
+		string text = detail ?? string.Empty;
+		if (text.IndexOf("horizontal", StringComparison.OrdinalIgnoreCase) >= 0) return "BRANCH_NOT_HORIZONTAL";
+		if (text.IndexOf("intersection", StringComparison.OrdinalIgnoreCase) >= 0) return "NO_INTERSECTION_FOUND";
+		if (text.IndexOf("slope", StringComparison.OrdinalIgnoreCase) >= 0) return "SLOPE_MISMATCH";
+		if (text.IndexOf("3 control", StringComparison.OrdinalIgnoreCase) >= 0) return "ROUTE_PROFILE_UNSATISFIED";
+		if (text.IndexOf("connector", StringComparison.OrdinalIgnoreCase) >= 0) return "NO_CONNECTOR";
+		return "FLEX_CONNECTION_FAILED";
 	}
 
 	private static Connector GetUnusedPipingEndConnector(Element elem)
@@ -2361,13 +2383,32 @@ public class ConnectSprinklerFlexPipeMultiCmd : IExternalCommand
 	{
 		try
 		{
-			return ConnectSprinklerFlexPipeCmd.ExecuteMulti(
-				commandData.Application.ActiveUIDocument, ref message);
+			UIDocument uidoc = commandData.Application.ActiveUIDocument;
+			Document doc = uidoc == null ? null : uidoc.Document;
+			int pipeCount = uidoc == null ? 0 : uidoc.Selection.GetElementIds().Select(id => doc.GetElement(id)).OfType<Pipe>().Count();
+			int sprinklerCount = uidoc == null ? 0 : uidoc.Selection.GetElementIds().Select(id => doc.GetElement(id)).OfType<FamilyInstance>().Count(ConnectSprinklerFlexPipeCmd.IsSprinkler);
+			Result result = ConnectSprinklerFlexPipeCmd.ExecuteMulti(uidoc, ref message);
+			CommandDiagnostics.WriteL2("ConnectSprinklerFlexMulti", result == Result.Succeeded ? "succeeded" : "failed",
+				result == Result.Succeeded ? "COMPLETED" : ConnectSprinklerFlexPipeCmd.ClassifyFlexFailure(message), new
+			{
+				event_kind = "sprinkler_flex_multi_completion",
+				pipe_count = pipeCount,
+				sprinkler_count = sprinklerCount,
+				branch_status = result == Result.Succeeded ? "completed" : "failed"
+			});
+			return result;
 		}
 		catch (Exception ex)
 		{
 			message = ex.Message;
 			FlexPipeDiagnostics.Write("multi-command", "exception", ex.Message, details: ex.ToString());
+			CommandDiagnostics.WriteL2("ConnectSprinklerFlexMulti", "failed", ConnectSprinklerFlexPipeCmd.ClassifyFlexFailure(ex.Message), new
+			{
+				event_kind = "sprinkler_flex_multi_completion",
+				pipe_count = 0,
+				sprinkler_count = 0,
+				branch_status = "failed"
+			});
 			TaskDialog.Show("BIM TOOL - Sprinkler Flex Pipe", "Lỗi trong quá trình kết nối: " + ex.Message + "\n\nChi tiết kỹ thuật đã được ghi nhận vào hệ thống chẩn đoán.");
 			return Result.Failed;
 		}

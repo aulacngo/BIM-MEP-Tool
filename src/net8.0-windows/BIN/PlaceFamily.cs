@@ -119,11 +119,28 @@ public class PlaceFamily : IExternalCommand
 					List<XYZ> pointsToPlace = uniqueCadPoints
 						.FindAll(point => !ContainsPointByXY(existingPoints, point, 1.0 / 304.8));
 					int skippedExisting = uniqueCadPoints.Count - pointsToPlace.Count;
+					bool isDynamicBlock = !string.IsNullOrWhiteSpace(cadBlock) && cadBlock.StartsWith("*", StringComparison.Ordinal);
+					string targetLevelName = ((Element)level).Name;
+					string activeViewType = doc.ActiveView == null ? "Unknown" : doc.ActiveView.ViewType.ToString();
+					bool hasViewRangeWarning = doc.ActiveView != null && doc.ActiveView.ViewType == ViewType.FloorPlan && elevation > 2000.0 / 304.8;
 					string firstPoint = uniqueCadPoints.Count > 0
 						? $"({uniqueCadPoints[0].X:0.###}, {uniqueCadPoints[0].Y:0.###}, {uniqueCadPoints[0].Z:0.###}) ft"
 						: "None";
 					CommandDiagnostics.Write("PlaceFamily", "scan", commandData, Result.Succeeded,
 						$"Block={cadBlock}; Raw={rawPointCount}; Unique={uniqueCadPoints.Count}; SkippedExisting={skippedExisting}; ToPlace={pointsToPlace.Count}; FirstPoint={firstPoint}; Scan={PlaceFamilyUtils.LastBlockScanDiagnostics}");
+					CommandDiagnostics.WriteL2("PlaceFamily", "succeeded", "SCAN_COMPLETED", new
+					{
+						event_kind = "cad_block_scan",
+						block_name = cadBlock,
+						is_dynamic_block = isDynamicBlock,
+						raw_points = rawPointCount,
+						unique_points = uniqueCadPoints.Count,
+						skipped_existing = skippedExisting,
+						placed_count = 0,
+						target_level = targetLevelName,
+						view_type = activeViewType,
+						view_range_warning = hasViewRangeWarning
+					});
 					if (pointsToPlace.Count == 0)
 					{
 						TaskDialog.Show("Place Family", $"Đã tìm thấy {rawPointCount} block ({uniqueCadPoints.Count} vị trí duy nhất), nhưng tất cả vị trí đã có Family cùng type trên Level '{((Element)level).Name}'.");
@@ -164,7 +181,20 @@ public class PlaceFamily : IExternalCommand
 							string idSummary = FormatIdSummary(createdIds);
 							CommandDiagnostics.Write("PlaceFamily", "placement", commandData, Result.Succeeded,
 								$"Block={cadBlock}; Raw={rawPointCount}; Unique={uniqueCadPoints.Count}; SkippedExisting={skippedExisting}; Created={createdIds.Count}; FirstPoint={firstPoint}; Ids={string.Join(",", createdIds)}; Actual={actualPlacement}; Scan={PlaceFamilyUtils.LastBlockScanDiagnostics}");
-							string viewRangeWarning = doc.ActiveView.ViewType == ViewType.FloorPlan && elevation > 2000.0 / 304.8
+							CommandDiagnostics.WriteL2("PlaceFamily", "succeeded", "PLACEMENT_COMPLETED", new
+							{
+								event_kind = "cad_block_placement",
+								block_name = cadBlock,
+								is_dynamic_block = isDynamicBlock,
+								raw_points = rawPointCount,
+								unique_points = uniqueCadPoints.Count,
+								skipped_existing = skippedExisting,
+								placed_count = createdIds.Count,
+								target_level = targetLevelName,
+								view_type = activeViewType,
+								view_range_warning = hasViewRangeWarning
+							});
+							string viewRangeWarning = hasViewRangeWarning
 								? $"\n\nLưu ý: đối tượng được đặt ở cao trên ({elevation * 304.8:0} mm), có thể không hiển thị trên Mặt bằng sàn (Floor Plan) do View Range. Vui lòng mở Reflected Ceiling Plan (Mặt bằng trần) hoặc 3D View để quan sát."
 								: string.Empty;
 							TaskDialog.Show("Hoàn tất", $"Đã đặt {createdIds.Count} đối tượng.\nID: {idSummary}\n\nView hiện tại được giữ nguyên. Danh sách ID đầy đủ đã ghi vào diagnostics.{viewRangeWarning}");
