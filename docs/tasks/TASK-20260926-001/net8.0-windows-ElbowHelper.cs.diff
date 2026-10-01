@@ -1,0 +1,36 @@
+--- baseline/net8.0-windows/ElbowHelper.cs
++++ src/net8.0-windows/BIN/ElbowHelper.cs
+@@ -35,6 +35,11 @@
+ 			Reference pickedRef = uiDoc.Selection.PickObject((ObjectType)1, filter, "Please pick a point on Duct, Pipe or Conduit.");
+ 			Element element = doc.GetElement(pickedRef);
+ 			XYZ pickedPoint = pickedRef.GlobalPoint;
++			if (element is Duct duct)
++			{
++				DuctElbowBuilder.Execute(doc, duct, pickedPoint, direction);
++				return Result.Succeeded;
++			}
+ 			Connector[] unusedConns = NaviateHelper.ConnectorArrayUnused(element);
+ 			if (unusedConns == null)
+ 			{
+@@ -69,10 +74,6 @@
+ 				{
+ 					NaviateHelper.DrawPipeWithElbow(doc, pickedRef, pickedPoint, sourceConn, origin, endPoint);
+ 				}
+-				else if (element is Duct)
+-				{
+-					NaviateHelper.DrawDuct(doc, pickedRef, pickedPoint, sourceConn, origin, endPoint);
+-				}
+ 				else if (element is Conduit)
+ 				{
+ 					NaviateHelper.DrawConduit(doc, pickedRef, pickedPoint, sourceConn, origin, endPoint, NaviateHelper.GetLevel(doc, origin.Z));
+@@ -95,7 +96,9 @@
+ 		}
+ 		catch (Exception ex)
+ 		{
+-			TaskDialog.Show("Error", ex.Message);
++			message = "Elbow " + direction + ": " + ex.Message;
++			SimpleLogger.Log(message + Environment.NewLine + ex);
++			TaskDialog.Show("Elbow", message);
+ 			return Result.Failed;
+ 		}
+ 	}

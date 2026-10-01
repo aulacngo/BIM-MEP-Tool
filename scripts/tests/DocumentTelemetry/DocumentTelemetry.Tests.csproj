@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFrameworks>net48;net8.0</TargetFrameworks>
+    <LangVersion>12.0</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <TelemetrySourceTarget Condition="'$(TargetFramework)' == 'net48'">net48</TelemetrySourceTarget>
+    <TelemetrySourceTarget Condition="'$(TargetFramework)' == 'net8.0'">net8.0-windows</TelemetrySourceTarget>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="RevitTestDoubles.cs" />
+    <Compile Include="../../../src/$(TelemetrySourceTarget)/BIN/DocumentTelemetryTracker.cs" Link="DocumentTelemetryTracker.cs" Condition="'$(TelemetrySourceTarget)' != ''" />
+    <Compile Include="../../../src/$(TelemetrySourceTarget)/BIN/TelemetryHttpTransport.cs" Link="TelemetryHttpTransport.cs" Condition="'$(TelemetrySourceTarget)' != ''" />
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>../../../BIN.bundle (2)/BIN.bundle/Contents/net48/Newtonsoft.Json.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

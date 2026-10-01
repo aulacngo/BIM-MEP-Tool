@@ -1,0 +1,49 @@
+# Build output (.NET / Revit add-in)
+**/bin/
+**/obj/
+# Git on Windows matches paths case-insensitively; these are source folders.
+!src/net48/BIN/
+!src/net48/BIN/**
+!src/net8.0-windows/BIN/
+!src/net8.0-windows/BIN/**
+*.dll
+*.pdb
+
+# Release artifacts and installers
+/release/
+*.zip
+*.7z
+*.exe
+Setup_BIN_TOOL.exe
+
+# Large Revit test assets and duplicate bundles
+/Template test/
+*.rvt
+/BIN.bundle (2)/
+
+# Generated documentation binaries
+/docs/**/*.dll
+/docs/**/*.pdb
+
+# Secrets and release credentials
+/scripts/gofile_account.json
+/scripts/gofile_releases.json
+*.token.json
+token.json
+credentials.json
+
+# Visual Studio user state
+*.user
+*.suo
+.vs/
+
+# Logs, scratch data, dataset, and local backups
+/dataset/
+*.log
+/scratch/
+/.system_generated/
+*.backup_*
+
+# Python helper-script cache
+__pycache__/
+*.py[cod]

@@ -1,0 +1,154 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>BIN</AssemblyName>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <UseWPF>True</UseWPF>
+    <UseWindowsForms>True</UseWindowsForms>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <RootNamespace />
+    <NoWarn>$(NoWarn);0162;0618;0612;0168;0219;0050;0067;0414;CA1416;SYSLIB0050</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="BIN\**\*.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Remove="20.-20connect-20sprinkler-20to-20pipe\connectsprinklertopipewindow.baml" />
+    <None Remove="13.-20export-20family\processbarview.baml" />
+    <None Remove="32.-20copy-20sheet\copysheetwindow.baml" />
+    <None Remove="34.-20manage-20grid-20level\managegridlevelwindow.baml" />
+    <None Remove="59.-20check-20pipe-20fitting\checkpipefittingwindow.baml" />
+    <None Remove="progressbar\progressbarview.baml" />
+    <None Remove="16.-20place-20multi-20pipe-20support\multipipesupportwindow.baml" />
+    <None Remove="07.-20transfer-20to-20reducing-20elbow\transfertoreducingelbowwindow.baml" />
+    <None Remove="26.-20toggle-20insulation\toggleinsulationwindow.baml" />
+    <None Remove="37.-20clash-20detective\clashdetectivewindow.baml" />
+    <None Remove="29.-20turn-20mep\turnmepwindow.baml" />
+    <None Remove="43.-20boq\boqwindow.baml" />
+    <None Remove="42.-20toggle-20section-20head\togglesectionwindow.baml" />
+    <None Remove="08.-20sprinkler-20flipper-20up-20to-20down\sprinklerselectionwindow.baml" />
+    <None Remove="14.-20turn-20drainage-20pipe\turndrainagepipewindow.baml" />
+    <None Remove="11.-20split-20duct\splitductwindow.baml" />
+    <None Remove="05.-20replace-20pipe-20with-20nipple\selectfamilywindow.baml" />
+    <None Remove="40.-20compare-20element\compareelementwindow.baml" />
+    <None Remove="62.-20check-20undefined-20pipe\checkundefinedpipewindow.baml" />
+    <None Remove="21.-20copy-202d-20element-20to-20other-20document\copy2delementwindow.baml" />
+    <None Remove="10.-20place-20family\placefamilywindow.baml" />
+    <None Remove="30.-20mep-20offset\mepoffsetwindow.baml" />
+    <None Remove="61.-20check-20connected-20pipe\checkconnectedpipewindow.baml" />
+    <None Remove="27.-20draw-20clean-20out\drawcleanoutwindow.baml" />
+    <None Remove="22.-20copy-20view\copyviewwindow.baml" />
+    <None Remove="58.-20flex-20duct-20avoid-20mep\avoidmepwindow.baml" />
+    <None Remove="28.-20place-20support\placesupportwindow.baml" />
+    <None Remove="18.-20remove-20pipe-20coupling\removepipecouplingwindow.baml" />
+    <None Remove="12.-20sheet-20from-20excel\sheetfromexcelview.baml" />
+    <None Remove="57.-20check-20air-20terminal\checkairterminalwindow.baml" />
+    <None Remove="39.-20select-20by-20parameter\view\selectbyparameterview.baml" />
+    <None Remove="15.-20draw-20drainage-20pipe\drainagepipetypepickerwindow.baml" />
+    <None Remove="17.-20rotate-20family-20instance\rotatefamilyinstancewindow.baml" />
+    <None Remove="13.-20export-20family\exportfamilywindow.baml" />
+    <None Remove="02.-20create-202-20elbows-2045\inputlengthwindow.baml" />
+    <None Remove="25.-20delete-202d-20element\delete2delementwindow.baml" />
+    <None Remove="19.-20connect-20tee-20and-20reducer-20--20groove\connectteeandreducerwindow.baml" />
+    <None Remove="60.-20copy-20filter\copyfilterwindow.baml" />
+    <None Remove="158.-20check-20sprinkler\checksprinklerwindow.baml" />
+    <None Remove="31.-20rename-20element\renameelementwindow.baml" />
+    <None Remove="24.-20export-20schedule-20to-20excel\mainwindow.baml" />
+    <None Remove="23.-20change-20reference-20level\meplevelchangerview.baml" />
+    <None Remove="06.-20sprinkler-20shortener-20vertical-20pipe\promptwindow.baml" />
+    <None Remove="36.-20select-20element\selectelementwindow.baml" />
+    <None Remove="65.-20align-20support\alignsupportwindow.baml" />
+    <None Remove="39.-20select-20by-20parameter\common\ui\progressbarview.baml" />
+    <None Remove="35.-20pipe-20insulation\pipeinsulationwindow.baml" />
+    <EmbeddedResource Include="20.-20connect-20sprinkler-20to-20pipe\connectsprinklertopipewindow.baml" LogicalName="20.%20connect%20sprinkler%20to%20pipe/connectsprinklertopipewindow.baml" />
+    <EmbeddedResource Include="13.-20export-20family\processbarview.baml" LogicalName="13.%20export%20family/processbarview.baml" />
+    <EmbeddedResource Include="32.-20copy-20sheet\copysheetwindow.baml" LogicalName="32.%20copy%20sheet/copysheetwindow.baml" />
+    <EmbeddedResource Include="34.-20manage-20grid-20level\managegridlevelwindow.baml" LogicalName="34.%20manage%20grid%20level/managegridlevelwindow.baml" />
+    <EmbeddedResource Include="59.-20check-20pipe-20fitting\checkpipefittingwindow.baml" LogicalName="59.%20check%20pipe%20fitting/checkpipefittingwindow.baml" />
+    <EmbeddedResource Include="progressbar\progressbarview.baml" LogicalName="progressbar/progressbarview.baml" />
+    <EmbeddedResource Include="16.-20place-20multi-20pipe-20support\multipipesupportwindow.baml" LogicalName="16.%20place%20multi%20pipe%20support/multipipesupportwindow.baml" />
+    <EmbeddedResource Include="07.-20transfer-20to-20reducing-20elbow\transfertoreducingelbowwindow.baml" LogicalName="07.%20transfer%20to%20reducing%20elbow/transfertoreducingelbowwindow.baml" />
+    <EmbeddedResource Include="26.-20toggle-20insulation\toggleinsulationwindow.baml" LogicalName="26.%20toggle%20insulation/toggleinsulationwindow.baml" />
+    <EmbeddedResource Include="37.-20clash-20detective\clashdetectivewindow.baml" LogicalName="37.%20clash%20detective/clashdetectivewindow.baml" />
+    <EmbeddedResource Include="29.-20turn-20mep\turnmepwindow.baml" LogicalName="29.%20turn%20mep/turnmepwindow.baml" />
+    <EmbeddedResource Include="43.-20boq\boqwindow.baml" LogicalName="43.%20boq/boqwindow.baml" />
+    <EmbeddedResource Include="42.-20toggle-20section-20head\togglesectionwindow.baml" LogicalName="42.%20toggle%20section%20head/togglesectionwindow.baml" />
+    <EmbeddedResource Include="08.-20sprinkler-20flipper-20up-20to-20down\sprinklerselectionwindow.baml" LogicalName="08.%20sprinkler%20flipper%20up%20to%20down/sprinklerselectionwindow.baml" />
+    <EmbeddedResource Include="14.-20turn-20drainage-20pipe\turndrainagepipewindow.baml" LogicalName="14.%20turn%20drainage%20pipe/turndrainagepipewindow.baml" />
+    <EmbeddedResource Include="11.-20split-20duct\splitductwindow.baml" LogicalName="11.%20split%20duct/splitductwindow.baml" />
+    <EmbeddedResource Include="05.-20replace-20pipe-20with-20nipple\selectfamilywindow.baml" LogicalName="05.%20replace%20pipe%20with%20nipple/selectfamilywindow.baml" />
+    <EmbeddedResource Include="40.-20compare-20element\compareelementwindow.baml" LogicalName="40.%20compare%20element/compareelementwindow.baml" />
+    <EmbeddedResource Include="62.-20check-20undefined-20pipe\checkundefinedpipewindow.baml" LogicalName="62.%20check%20undefined%20pipe/checkundefinedpipewindow.baml" />
+    <EmbeddedResource Include="21.-20copy-202d-20element-20to-20other-20document\copy2delementwindow.baml" LogicalName="21.%20copy%202d%20element%20to%20other%20document/copy2delementwindow.baml" />
+    <EmbeddedResource Include="10.-20place-20family\placefamilywindow.baml" LogicalName="10.%20place%20family/placefamilywindow.baml" />
+    <EmbeddedResource Include="30.-20mep-20offset\mepoffsetwindow.baml" LogicalName="30.%20mep%20offset/mepoffsetwindow.baml" />
+    <EmbeddedResource Include="61.-20check-20connected-20pipe\checkconnectedpipewindow.baml" LogicalName="61.%20check%20connected%20pipe/checkconnectedpipewindow.baml" />
+    <EmbeddedResource Include="27.-20draw-20clean-20out\drawcleanoutwindow.baml" LogicalName="27.%20draw%20clean%20out/drawcleanoutwindow.baml" />
+    <EmbeddedResource Include="22.-20copy-20view\copyviewwindow.baml" LogicalName="22.%20copy%20view/copyviewwindow.baml" />
+    <EmbeddedResource Include="58.-20flex-20duct-20avoid-20mep\avoidmepwindow.baml" LogicalName="58.%20flex%20duct%20avoid%20mep/avoidmepwindow.baml" />
+    <EmbeddedResource Include="28.-20place-20support\placesupportwindow.baml" LogicalName="28.%20place%20support/placesupportwindow.baml" />
+    <EmbeddedResource Include="18.-20remove-20pipe-20coupling\removepipecouplingwindow.baml" LogicalName="18.%20remove%20pipe%20coupling/removepipecouplingwindow.baml" />
+    <EmbeddedResource Include="12.-20sheet-20from-20excel\sheetfromexcelview.baml" LogicalName="12.%20sheet%20from%20excel/sheetfromexcelview.baml" />
+    <EmbeddedResource Include="57.-20check-20air-20terminal\checkairterminalwindow.baml" LogicalName="57.%20check%20air%20terminal/checkairterminalwindow.baml" />
+    <EmbeddedResource Include="39.-20select-20by-20parameter\view\selectbyparameterview.baml" LogicalName="39.%20select%20by%20parameter/view/selectbyparameterview.baml" />
+    <EmbeddedResource Include="15.-20draw-20drainage-20pipe\drainagepipetypepickerwindow.baml" LogicalName="15.%20draw%20drainage%20pipe/drainagepipetypepickerwindow.baml" />
+    <EmbeddedResource Include="17.-20rotate-20family-20instance\rotatefamilyinstancewindow.baml" LogicalName="17.%20rotate%20family%20instance/rotatefamilyinstancewindow.baml" />
+    <EmbeddedResource Include="13.-20export-20family\exportfamilywindow.baml" LogicalName="13.%20export%20family/exportfamilywindow.baml" />
+    <EmbeddedResource Include="02.-20create-202-20elbows-2045\inputlengthwindow.baml" LogicalName="02.%20create%202%20elbows%2045/inputlengthwindow.baml" />
+    <EmbeddedResource Include="25.-20delete-202d-20element\delete2delementwindow.baml" LogicalName="25.%20delete%202d%20element/delete2delementwindow.baml" />
+    <EmbeddedResource Include="19.-20connect-20tee-20and-20reducer-20--20groove\connectteeandreducerwindow.baml" LogicalName="19.%20connect%20tee%20and%20reducer%20-%20groove/connectteeandreducerwindow.baml" />
+    <EmbeddedResource Include="60.-20copy-20filter\copyfilterwindow.baml" LogicalName="60.%20copy%20filter/copyfilterwindow.baml" />
+    <EmbeddedResource Include="158.-20check-20sprinkler\checksprinklerwindow.baml" LogicalName="158.%20check%20sprinkler/checksprinklerwindow.baml" />
+    <EmbeddedResource Include="31.-20rename-20element\renameelementwindow.baml" LogicalName="31.%20rename%20element/renameelementwindow.baml" />
+    <EmbeddedResource Include="24.-20export-20schedule-20to-20excel\mainwindow.baml" LogicalName="24.%20export%20schedule%20to%20excel/mainwindow.baml" />
+    <EmbeddedResource Include="23.-20change-20reference-20level\meplevelchangerview.baml" LogicalName="23.%20change%20reference%20level/meplevelchangerview.baml" />
+    <EmbeddedResource Include="06.-20sprinkler-20shortener-20vertical-20pipe\promptwindow.baml" LogicalName="06.%20sprinkler%20shortener%20vertical%20pipe/promptwindow.baml" />
+    <EmbeddedResource Include="36.-20select-20element\selectelementwindow.baml" LogicalName="36.%20select%20element/selectelementwindow.baml" />
+    <EmbeddedResource Include="65.-20align-20support\alignsupportwindow.baml" LogicalName="65.%20align%20support/alignsupportwindow.baml" />
+    <EmbeddedResource Include="39.-20select-20by-20parameter\common\ui\progressbarview.baml" LogicalName="39.%20select%20by%20parameter/common/ui/progressbarview.baml" />
+    <EmbeddedResource Include="35.-20pipe-20insulation\pipeinsulationwindow.baml" LogicalName="35.%20pipe%20insulation/pipeinsulationwindow.baml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="RevitAPI">
+      <HintPath>C:\Program Files\Autodesk\Revit 2026\RevitAPI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="RevitAPIUI">
+      <HintPath>C:\Program Files\Autodesk\Revit 2026\RevitAPIUI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="AdWindows">
+      <HintPath>C:\Program Files\Autodesk\Revit 2026\AdWindows.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="AcDbMgd">
+      <HintPath>C:\Program Files\Autodesk\Revit 2026\AcDbMgd.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="GalaSoft.MvvmLight">
+      <HintPath>..\..\BIN.bundle (2)\BIN.bundle\Contents\net48\GalaSoft.MvvmLight.dll</HintPath>
+    </Reference>
+    <Reference Include="EPPlus">
+      <HintPath>..\..\BIN.bundle (2)\BIN.bundle\Contents\net48\EPPlus.dll</HintPath>
+    </Reference>
+    <Reference Include="MathNet.Numerics">
+      <HintPath>..\..\BIN.bundle (2)\BIN.bundle\Contents\net48\MathNet.Numerics.dll</HintPath>
+    </Reference>
+    <Reference Include="NPOI.Core">
+      <HintPath>..\..\BIN.bundle (2)\BIN.bundle\Contents\net48\NPOI.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="NPOI.OOXML">
+      <HintPath>..\..\BIN.bundle (2)\BIN.bundle\Contents\net48\NPOI.OOXML.dll</HintPath>
+    </Reference>
+    <Reference Include="ExcelDataReader">
+      <HintPath>..\..\BIN.bundle (2)\BIN.bundle\Contents\net48\ExcelDataReader.dll</HintPath>
+    </Reference>
+    <Reference Include="ExcelDataReader.DataSet">
+      <HintPath>..\..\BIN.bundle (2)\BIN.bundle\Contents\net48\ExcelDataReader.DataSet.dll</HintPath>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>..\..\BIN.bundle (2)\BIN.bundle\Contents\net48\Newtonsoft.Json.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

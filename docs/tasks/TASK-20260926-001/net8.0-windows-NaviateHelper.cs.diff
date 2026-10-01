@@ -1,0 +1,117 @@
+--- baseline/net8.0-windows/NaviateHelper.cs
++++ src/net8.0-windows/BIN/NaviateHelper.cs
+@@ -415,6 +415,8 @@
+ 
+ 	public static double GetExtensionLength(Connector connector)
+ 	{
++		if (connector.Owner is Duct duct)
++			return DuctProfileData.Read(duct, connector).ExtensionLength;
+ 		//IL_000c: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_0012: Expected I4, but got Unknown
+ 		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
+@@ -737,101 +739,10 @@
+ 
+ 	public static void DrawDuct(Document doc, Reference selectedReference, XYZ selectedPoint, Connector closestConnectorSource, XYZ start, XYZ end)
+ 	{
+-		//IL_004d: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0054: Expected O, but got Unknown
+-		//IL_02a8: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0057: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_01f0: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_015c: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0163: Expected O, but got Unknown
+-		//IL_025e: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0265: Expected O, but got Unknown
+-		//IL_0268: Unknown result type (might be due to invalid IL or missing references)
+-		try
+-		{
+-			Element sourceElement = doc.GetElement(selectedReference);
+-			Duct oldDuct = (Duct)(object)((sourceElement is Duct) ? sourceElement : null);
+-			if (oldDuct == null)
+-			{
+-				return;
+-			}
+-			DuctType ductType = oldDuct.DuctType;
+-			MechanicalSystemType mechanicalSystem = GetMechanicalSystem(doc, closestConnectorSource);
+-			ElementId level = GetLevel(doc, selectedPoint.Z);
+-			SubTransaction sT = new SubTransaction(doc);
+-			Duct newDuct;
+-			try
+-			{
+-				sT.Start();
+-				newDuct = Duct.Create(doc, ((Element)mechanicalSystem).Id, ((Element)ductType).Id, level, start, end);
+-				if (((MEPCurve)oldDuct).Diameter > 0.0)
+-				{
+-					((Element)newDuct).get_Parameter((BuiltInParameter)(-1114103)).Set(((MEPCurve)oldDuct).Diameter);
+-				}
+-				else
+-				{
+-					((Element)newDuct).get_Parameter((BuiltInParameter)(-1114101)).Set(((MEPCurve)oldDuct).Width);
+-					((Element)newDuct).get_Parameter((BuiltInParameter)(-1114102)).Set(((MEPCurve)oldDuct).Height);
+-					if (Math.Abs(start.X - end.X) < 0.001 && Math.Abs(start.Y - end.Y) < 0.001)
+-					{
+-						XYZ basisZ = closestConnectorSource.CoordinateSystem.BasisZ;
+-						XYZ upVector = new XYZ(0.0, 1.0, 0.0);
+-						double angle = basisZ.AngleTo(upVector);
+-						if (basisZ.DotProduct(upVector) > 0.0 && basisZ.X > 0.001)
+-						{
+-							angle = 0.0 - angle;
+-						}
+-						Line rotationAxis = Line.CreateBound(start, end);
+-						if (start.Z > end.Z)
+-						{
+-							rotationAxis = Line.CreateBound(end, start);
+-						}
+-						ElementTransformUtils.RotateElement(doc, ((Element)newDuct).Id, rotationAxis, angle);
+-					}
+-				}
+-				sT.Commit();
+-			}
+-			finally
+-			{
+-				((IDisposable)sT)?.Dispose();
+-			}
+-			doc.Regenerate();
+-			Connector connSource = ((IEnumerable)GetConnectorSet(sourceElement)).Cast<Connector>().FirstOrDefault((Connector c) => c.Origin.DistanceTo(start) < 0.001);
+-			Connector connNew = ((IEnumerable)GetConnectorSet((Element)(object)newDuct)).Cast<Connector>().FirstOrDefault((Connector c) => c.Origin.DistanceTo(start) < 0.001);
+-			if (connSource == null || connNew == null)
+-			{
+-				return;
+-			}
+-			SubTransaction sT2 = new SubTransaction(doc);
+-			try
+-			{
+-				sT2.Start();
+-				try
+-				{
+-					FamilyInstance newElbow = doc.Create.NewElbowFitting(connSource, connNew);
+-					CopyComments((Element)(object)oldDuct, (Element)(object)newDuct, newElbow);
+-				}
+-				catch
+-				{
+-					try
+-					{
+-						connSource.ConnectTo(connNew);
+-					}
+-					catch
+-					{
+-					}
+-				}
+-				sT2.Commit();
+-			}
+-			finally
+-			{
+-				((IDisposable)sT2)?.Dispose();
+-			}
+-		}
+-		catch (Exception ex)
+-		{
+-			SimpleLogger.Log("DrawDuct Error: " + ex.Message);
+-		}
++		Duct source = (selectedReference != null ? doc.GetElement(selectedReference) : closestConnectorSource?.Owner) as Duct;
++		if (source == null)
++			throw new System.InvalidOperationException("The selected element is not a duct.");
++		DuctElbowBuilder.Build(doc, source, closestConnectorSource, start, end);
+ 	}
+ 
+ 	public static Pipe DrawPipeWithElbow(Document doc, Reference selectedReference, XYZ selectedPoint, Connector closestConnectorSource, XYZ start, XYZ end)
