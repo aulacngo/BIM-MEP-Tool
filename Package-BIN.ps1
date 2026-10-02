@@ -3,8 +3,10 @@ $ErrorActionPreference = "Stop"
 $root = "D:\Tool Revit"
 $releaseBase = "$root\release"
 $dateStr = Get-Date -Format "yyyyMMdd"
-$portableFolder = "$releaseBase\BIM-Tool-Portable-$dateStr-Current"
-$zipFile = "$releaseBase\BIM-Tool-CurrentUser-NoAdmin-$dateStr.zip"
+$timeStr = Get-Date -Format "HHmm"
+$versionTag = "$dateStr-$timeStr"
+$portableFolder = "$releaseBase\BIM-Tool-Portable-$versionTag"
+$zipFile = "$releaseBase\BIM-Tool-CurrentUser-NoAdmin-$versionTag.zip"
 
 Write-Host "Packaging $portableFolder..." -ForegroundColor Cyan
 
@@ -43,8 +45,8 @@ Copy-Item -LiteralPath "$installerSource\HotUpdate.ps1" -Destination (Join-Path 
 
 # 3. Create HUONG-DAN-CAT-DAT.txt
 $readme = @"
-BIM TOOL - BO CAI PORTABLE - CURRENT $dateStr
-===============================================
+BIM TOOL - BO CAI PORTABLE - BUILD $versionTag
+=================================================
 
 Ho tro theo PackageContents.xml:
 - Revit 2020, 2021, 2022, 2023, 2024: .NET Framework 4.8
@@ -66,9 +68,10 @@ Ho tro theo PackageContents.xml:
 3. Bấm đúp file "Install.cmd" (tự động đăng ký Addin cho toàn bộ Revit 2020-2026).
 4. Mở Revit -> Chọn "Always Load" khi được hỏi.
 
-TRANG THAI BAN NAY ($dateStr):
+TRANG THAI BAN NAY ($versionTag):
+- Đã nâng cấp Pipe Insulation: 5 Preset tiêu chuẩn (Chiller, Nước ngưng, Nước nóng, Đa hệ, Custom), tự động nhảy preset theo hệ và bọc kín cả fitting.
 - Đã kích hoạt Hot-Reload Live: Cập nhật tính năng mới trực tiếp vào phiên Revit đang mở.
-- Đã khắc phục triệt để lỗi né dầm Avoid Clash: Giao cắt Solid 3D chuẩn xác cho dầm xiên/chéo, tự động bắt cao độ đáy dầm và bảo toàn kết nối đường ống.
+- Đã khắc phục triệt để lỗi né dầm Avoid Clash: Dạng 90° chữ U vuông góc và dạng 45° chuẩn thủy lực, hỗ trợ dầm link kết cấu.
 - Toàn bộ 75 công cụ chạy độc lập không cần quyền Administrator (%APPDATA%).
 "@
 [System.IO.File]::WriteAllText((Join-Path $portableFolder "HUONG-DAN-CAT-DAT.txt"), $readme.Trim(), [System.Text.Encoding]::UTF8)
@@ -76,8 +79,8 @@ TRANG THAI BAN NAY ($dateStr):
 
 # 4. Create BUILD-STATUS.txt
 $buildStatus = @"
-BIM TOOL CURRENT BUILD - $dateStr
-===================================
+BIM TOOL CURRENT BUILD - $versionTag
+====================================
 
 Targets:
 - Revit 2020-2024: Contents\net48\BIN.dll
