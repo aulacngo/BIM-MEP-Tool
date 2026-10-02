@@ -34,10 +34,12 @@ Get-ChildItem -Path $bundleDest -Recurse -Filter "*.addin" | ForEach-Object {
     Set-Content -LiteralPath $_.FullName -Value $content -Encoding UTF8 -Force
 }
 
-# 2. Copy Install.cmd and Install-BIN-Tool.ps1
+# 2. Copy Install.cmd, Install-BIN-Tool.ps1, HotUpdate.cmd, and HotUpdate.ps1
 $installerSource = "$root\scripts\installer"
 Copy-Item -LiteralPath "$installerSource\Install.cmd" -Destination (Join-Path $portableFolder "Install.cmd") -Force
 Copy-Item -LiteralPath "$installerSource\Install-BIN-Tool.ps1" -Destination (Join-Path $portableFolder "Install-BIN-Tool.ps1") -Force
+Copy-Item -LiteralPath "$installerSource\HotUpdate.cmd" -Destination (Join-Path $portableFolder "HotUpdate.cmd") -Force
+Copy-Item -LiteralPath "$installerSource\HotUpdate.ps1" -Destination (Join-Path $portableFolder "HotUpdate.ps1") -Force
 
 # 3. Create HUONG-DAN-CAT-DAT.txt
 $readme = @"
@@ -48,21 +50,29 @@ Ho tro theo PackageContents.xml:
 - Revit 2020, 2021, 2022, 2023, 2024: .NET Framework 4.8
 - Revit 2025, 2026: .NET 8 Windows
 
-CACH CAI NHANH (KHONG CAN QUYEN ADMINISTRATOR):
-1. Dong tat ca cua so Revit.
-2. Giai nen toan bo file ZIP ra mot thu muc tren may.
-3. Bam dup Install.cmd de cai dat tu dong trong 2 giay.
-4. Mo Revit.
-5. Neu Revit hoi quyen nap add-in lan dau, chon "Always Load".
-6. Vao tab BIM - MEP va BIM - DOCS su dung day du 75 cong cu.
+================================================================================
+>>> CÁCH 1: CẬP NHẬT TRỰC TIẾP KHÔNG CẦN TẮT REVIT (HOT-RELOAD LIVE) <<<
+================================================================================
+- Khi Revit đang mở dự án làm việc tại công ty:
+  1. Tải và giải nén file ZIP này.
+  2. Bấm đúp file "HotUpdate.cmd" (chạy trong 1 giây).
+  3. KHÔNG CẦN TẮT REVIT. Quay lại Revit bấm nút trên Ribbon là ăn tính năng mới ngay lập tức!
+
+================================================================================
+>>> CÁCH 2: CÀI ĐẶT LẦN ĐẦU TRÊN MÁY MỚI <<<
+================================================================================
+1. Đóng Revit nếu đang mở.
+2. Giải nén toàn bộ file ZIP.
+3. Bấm đúp file "Install.cmd" (tự động đăng ký Addin cho toàn bộ Revit 2020-2026).
+4. Mở Revit -> Chọn "Always Load" khi được hỏi.
 
 TRANG THAI BAN NAY ($dateStr):
-- Da doi toan bo nhan dien thuong hieu sang BIM TOOL (Tab BIM - MEP, BIM - DOCS).
-- Toi uu uon Flex Pipe 3 diem tu nhien theo trong luc va ban kinh uon R >= 300mm.
-- Tich hop he thong Action Episode Telemetry ghi nhan System, Size, Length tu dong.
-- Toan bo file duoc cai trong %APPDATA% cua user hien tai, khong can quyen admin.
+- Đã kích hoạt Hot-Reload Live: Cập nhật tính năng mới trực tiếp vào phiên Revit đang mở.
+- Đã khắc phục triệt để lỗi né dầm Avoid Clash: Giao cắt Solid 3D chuẩn xác cho dầm xiên/chéo, tự động bắt cao độ đáy dầm và bảo toàn kết nối đường ống.
+- Toàn bộ 75 công cụ chạy độc lập không cần quyền Administrator (%APPDATA%).
 "@
 [System.IO.File]::WriteAllText((Join-Path $portableFolder "HUONG-DAN-CAT-DAT.txt"), $readme.Trim(), [System.Text.Encoding]::UTF8)
+
 
 # 4. Create BUILD-STATUS.txt
 $buildStatus = @"

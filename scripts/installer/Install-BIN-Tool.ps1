@@ -5,14 +5,16 @@ Write-Host "            TIEN TRINH CAI DAT BIM TOOL (CURRENT USER)              
 Write-Host "=========================================================================" -ForegroundColor Cyan
 Write-Host ""
 
-# 0. Kiem tra va tu dong dong tien trinh Revit neu dang mo (tranh khoa file DLL)
+# 0. Kiem tra xem Revit co dang mo khong
 $revitProcesses = Get-Process -Name "Revit" -ErrorAction SilentlyContinue
 if ($revitProcesses) {
-    Write-Host "[CANH BAO] Phat hien Revit dang chay tren may!" -ForegroundColor Yellow
-    Write-Host "Dang tu dong dong tien trinh Revit de cap nhat file DLL moi..." -ForegroundColor Cyan
-    $revitProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
-    Write-Host "[OK] Da dong Revit thanh cong." -ForegroundColor Green
+    Write-Host "[THONG BAO] Phat hien Revit dang mo tren may ($($revitProcesses.Count) tien trinh)!" -ForegroundColor Yellow
+    Write-Host "-> Tu dong chuyen sang che do HOT-RELOAD LIVE (Khong tat Revit, giu nguyen mo hinh dang lam viec)..." -ForegroundColor Cyan
+    $hotUpdateScript = Join-Path $PSScriptRoot "HotUpdate.ps1"
+    if (Test-Path -LiteralPath $hotUpdateScript) {
+        & $hotUpdateScript
+        exit 0
+    }
 }
 
 $sourceBundle = if (Test-Path (Join-Path $PSScriptRoot 'BIM.bundle')) { Join-Path $PSScriptRoot 'BIM.bundle' } else { Join-Path $PSScriptRoot 'BIN.bundle' }
@@ -53,15 +55,23 @@ try {
     exit 1
 }
 
-# 4. Vo hieu hoa hot-reload cu neu co
-$hotReloadConfig = Join-Path $env:LOCALAPPDATA 'BIM TOOL\Development\hotreload-net48.path'
-if (Test-Path -LiteralPath $hotReloadConfig) {
-    try {
-        $disabledConfig = $hotReloadConfig + '.disabled_' + (Get-Date -Format 'yyyyMMdd_HHmmss')
-        Move-Item -LiteralPath $hotReloadConfig -Destination $disabledConfig -Force -ErrorAction SilentlyContinue
-        Write-Host "[OK] Da vo hieu hoa cau hinh hot reload: $disabledConfig" -ForegroundColor DarkGray
-    } catch {}
+# 4. Khoi tao cau hinh Hot-Reload san sang cho cac lan cap nhat sau
+$devDir1 = Join-Path $env:LOCALAPPDATA 'BIM TOOL\Development'
+$devDir2 = Join-Path $env:LOCALAPPDATA 'BIN TOOL\Development'
+New-Item -ItemType Directory -Path $devDir1 -Force -ErrorAction SilentlyContinue | Out-Null
+New-Item -ItemType Directory -Path $devDir2 -Force -ErrorAction SilentlyContinue | Out-Null
+$installedDllNet48 = Join-Path $targetBundle "Contents\net48\BIN.dll"
+$installedDllNet8 = Join-Path $targetBundle "Contents\net8.0-windows\BIN.dll"
+if (Test-Path -LiteralPath $installedDllNet48) {
+    Set-Content -LiteralPath (Join-Path $devDir1 "hotreload-net48.path") -Value $installedDllNet48 -Encoding UTF8 -Force
+    Set-Content -LiteralPath (Join-Path $devDir2 "hotreload-net48.path") -Value $installedDllNet48 -Encoding UTF8 -Force
 }
+if (Test-Path -LiteralPath $installedDllNet8) {
+    Set-Content -LiteralPath (Join-Path $devDir1 "hotreload-net8.path") -Value $installedDllNet8 -Encoding UTF8 -Force
+    Set-Content -LiteralPath (Join-Path $devDir2 "hotreload-net8.path") -Value $installedDllNet8 -Encoding UTF8 -Force
+}
+Write-Host "[OK] Da thiet lap cau hinh Hot-Reload san sang." -ForegroundColor Green
+
 
 # 5. Tim phien ban Revit da cai tren may
 $detectedVersions = @()
