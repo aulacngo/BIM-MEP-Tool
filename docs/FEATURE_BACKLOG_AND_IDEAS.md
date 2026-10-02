@@ -31,7 +31,7 @@ Tài liệu này là **Trung tâm tích lũy ý tưởng (Master Backlog)** củ
 | **IDEA-06** | BIM - MEP | **CAD-to-BIM Learning**: Tự động học vị trí Miệng gió, FCU, Bơm từ CAD sang Revit | Rất Cao | 📐 SPECIFIED |
 | **IDEA-07** | BIM - SUPPORT | **Auto Hanger/Support Spacing**: Tự rải giá treo theo khoảng cách tiêu chuẩn | Trung bình | 💡 PROPOSED |
 | **IDEA-08** | BIM - CHECK | **Clash & Clearance Matrix**: Quét nhanh khoảng cách an toàn ống với dầm/cột | Trung bình | 💡 PROPOSED |
-| **IDEA-09** | BIM - MEP | **Khử khối vuông ở Tê (Smooth Tee Insulation)**: Tự động làm mượt ngã ba chữ T | Rất Cao | 📐 SPECIFIED |
+| **IDEA-09** | BIM - MEP | **Khử khối vuông ở Tê (Smooth Tee Insulation)**: Tự động làm mượt ngã ba chữ T | Rất Cao | ✅ RELEASED |
 
 ---
 
@@ -137,7 +137,7 @@ Tài liệu này là **Trung tâm tích lũy ý tưởng (Master Backlog)** củ
     - Riêng phụ kiện **Tee (chữ T)**: Tool chủ động **bỏ qua không bọc khối hộp của Fitting Tê**.
     - **Hiệu ứng đồ họa 3D:** Hai hình trụ bảo ôn tròn của Ống chính và Ống nhánh sẽ tự động đâm sát vào nhau tại ngã ba, tạo thành mối nối chữ T tròn trịa, trơn láng, tự nhiên như thợ thi công cắt mòi chữ V ngoài công trường, **biến mất hoàn toàn khối hộp vuông xấu xí**!
   - Vẫn tính toán và xuất khối lượng BOQ đầy đủ dựa trên diện tích bề mặt ống.
-- **Trạng thái:** 📐 SPECIFIED (Đã có phương án, sẵn sàng tích hợp).
+- **Trạng thái:** ✅ RELEASED (Đã tích hợp trong bản phát hành `20261002-1019` - Checkbox mặc định BẬT).
 
 ---
 
