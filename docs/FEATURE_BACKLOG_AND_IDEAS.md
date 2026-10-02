@@ -23,7 +23,7 @@ Tài liệu này là **Trung tâm tích lũy ý tưởng (Master Backlog)** củ
 
 | ID | Nhóm Công Cụ | Tên Ý Tưởng / Tính Năng Đề Xuất | Độ Ưu Tiên | Trạng Thái |
 | :---: | :--- | :--- | :---: | :---: |
-| **IDEA-01** | BIM - MEP | **Bọc bảo ôn Ống Gió (Duct Insulation)** & Bọc chống cháy EI | Cao | 📐 SPECIFIED |
+| **IDEA-01** | BIM - MEP | **Bọc bảo ôn Ống Gió (Duct Insulation)** & Bọc chống cháy EI | Cao | ✅ RELEASED |
 | **IDEA-02** | BIM - MEP | **Lọc cao độ trần thực tế (Spatial $Z$-Level Filtering)** cho Pipe/Duct | Cao | 📐 SPECIFIED |
 | **IDEA-03** | BIM - MEP | **Avoid Clash 3.0: Né dầm cho chùm nhiều ống song song (Multi-Pipe)** | Trung bình | 💡 PROPOSED |
 | **IDEA-04** | BIM - DRAINAGE | **Kiểm tra độ dốc tự động (Slope Health Check)** & Báo ống chảy ngược | Cao | 💡 PROPOSED |
@@ -54,6 +54,7 @@ Tài liệu này là **Trung tâm tích lũy ý tưởng (Master Backlog)** củ
 - **Revit API sử dụng:**
   - `DuctInsulation.Create(doc, duct.Id, ductInsulationTypeId, thicknessFeet)`
   - `DuctInsulation.Create(doc, ductFitting.Id, ductInsulationTypeId, thicknessFeet)`
+- **Trạng thái:** ✅ RELEASED (Đã tích hợp trực tiếp vào tool hiện có trong bản phát hành `20261002-1443`).
 
 ---
 
