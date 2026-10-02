@@ -32,16 +32,47 @@ public class AvoidClashCmd : IExternalCommand
 			Element runningPipeElem = doc.GetElement(refPipe);
 			if (runningPipeElem == null) return Result.Cancelled;
 
-			Reference refObstacle = uidoc.Selection.PickObject(
-				ObjectType.Element,
-				new AvoidClashObstacleSelectionFilter(),
-				"2. Click chon VAT CAN (Ong, Ong gio, Mang cap, Tuong, San hoac Dam ket cau)");
+			Reference refObstacle = null;
+			try
+			{
+				refObstacle = uidoc.Selection.PickObject(
+					ObjectType.PointOnElement,
+					new AvoidClashObstacleSelectionFilter(doc),
+					"2. Click chon VAT CAN (Dam ket cau trong file Link, hoac Ong, Ong gio, Tuong, San...)");
+			}
+			catch (Autodesk.Revit.Exceptions.OperationCanceledException)
+			{
+				return Result.Cancelled;
+			}
 			if (refObstacle == null) return Result.Cancelled;
 
-			Element obstacleElem = doc.GetElement(refObstacle);
-			if (obstacleElem == null) return Result.Cancelled;
+			Element obstacleElem = null;
+			Transform obstacleTransform = Transform.Identity;
+			if (refObstacle.LinkedElementId != null && refObstacle.LinkedElementId != ElementId.InvalidElementId)
+			{
+				RevitLinkInstance linkInstance = doc.GetElement(refObstacle.ElementId) as RevitLinkInstance;
+				Document linkDoc = linkInstance?.GetLinkDocument();
+				if (linkDoc == null)
+				{
+					TaskDialog.Show("Loi", "Khong the doc du lieu file Link Revit. Vui long kiem tra file link da duoc load day du.");
+					return Result.Cancelled;
+				}
 
-			AvoidClashWindow window = new AvoidClashWindow(uidoc, runningPipeElem, obstacleElem);
+				obstacleElem = linkDoc.GetElement(refObstacle.LinkedElementId);
+				obstacleTransform = linkInstance.GetTotalTransform();
+			}
+			else
+			{
+				obstacleElem = doc.GetElement(refObstacle);
+			}
+
+			if (obstacleElem == null || !AvoidClashObstacleSelectionFilter.IsValidObstacleCategory(obstacleElem.Category))
+			{
+				TaskDialog.Show("Thong bao", "Vui long chon dam ket cau, ong, ong gio, mang cap, tuong hoac san.");
+				return Result.Cancelled;
+			}
+
+			AvoidClashWindow window = new AvoidClashWindow(uidoc, runningPipeElem, obstacleElem, obstacleTransform);
 			IntPtr h = commandData.Application.MainWindowHandle;
 			if (h != IntPtr.Zero) new WindowInteropHelper(window).Owner = h;
 			window.ShowDialog();
@@ -59,9 +90,10 @@ public class AvoidClashCmd : IExternalCommand
 	}
 
 	public static bool ExecuteBypass(Document doc, Element runningPipeElem, Element obstacleElem,
-		double angleDeg, BypassDirection dir, double clearanceMm, out string error)
+		Transform obstacleTransform, double angleDeg, BypassDirection dir, double clearanceMm, out string error)
 	{
 		error = string.Empty;
+		obstacleTransform = obstacleTransform ?? Transform.Identity;
 		Pipe pipe = runningPipeElem as Pipe;
 		if (pipe == null)
 		{
@@ -105,7 +137,7 @@ public class AvoidClashCmd : IExternalCommand
 			return false;
 		}
 
-		if (!GetCrossingSpan(pipe, obstacleElem, out XYZ pEntry, out XYZ pExit, out double obsBottomZ, out double obsTopZ))
+		if (!GetCrossingSpan(pipe, obstacleElem, obstacleTransform, out XYZ pEntry, out XYZ pExit, out double obsBottomZ, out double obsTopZ))
 		{
 			error = "Khong xac dinh duoc vi tri ong cat qua vat can. Hay chon vat can co hinh hoc hop le.";
 			return false;
@@ -144,7 +176,7 @@ public class AvoidClashCmd : IExternalCommand
 			XYZ horiz = horizontalDirection.Normalize();
 			XYZ perp = new XYZ(-horiz.Y, horiz.X, 0.0);
 			uDir = dir == BypassDirection.Left ? perp : -perp;
-			double obstacleWidth = GetObstacleWidthAlongDirection(obstacleElem, uDir);
+			double obstacleWidth = GetObstacleWidthAlongDirection(obstacleElem, obstacleTransform, uDir);
 			vOffset = obstacleWidth * 0.5 + pipeRadius + clearanceFeet;
 		}
 
@@ -211,6 +243,12 @@ public class AvoidClashCmd : IExternalCommand
 		}
 	}
 
+	public static bool ExecuteBypass(Document doc, Element runningPipeElem, Element obstacleElem,
+		double angleDeg, BypassDirection dir, double clearanceMm, out string error)
+	{
+		return ExecuteBypass(doc, runningPipeElem, obstacleElem, Transform.Identity, angleDeg, dir, clearanceMm, out error);
+	}
+
 	private static Pipe CreatePipe(Document doc, ElementId systemTypeId, ElementId pipeTypeId,
 		ElementId levelId, XYZ start, XYZ end, double diameter)
 	{
@@ -220,7 +258,7 @@ public class AvoidClashCmd : IExternalCommand
 	}
 
 	// Solid intersection is the authority. The fallback never uses a beam midpoint.
-	private static bool GetCrossingSpan(Pipe pipe, Element obstacle, out XYZ pEntry, out XYZ pExit,
+	private static bool GetCrossingSpan(Pipe pipe, Element obstacle, Transform obstacleTransform, out XYZ pEntry, out XYZ pExit,
 		out double obsBottomZ, out double obsTopZ)
 	{
 		pEntry = null;
@@ -249,10 +287,23 @@ public class AvoidClashCmd : IExternalCommand
 		{
 			foreach (Solid solid in GetSolids(obstacle.get_Geometry(options)))
 			{
+				Solid solidToTest = solid;
+				if (obstacleTransform != null && !obstacleTransform.IsIdentity)
+				{
+					try
+					{
+						solidToTest = SolidUtils.CreateTransformed(solid, obstacleTransform);
+					}
+					catch
+					{
+						solidToTest = solid;
+					}
+				}
+
 				SolidCurveIntersection result;
 				try
 				{
-					result = solid.IntersectWithCurve(pipeLine, new SolidCurveIntersectionOptions
+					result = solidToTest.IntersectWithCurve(pipeLine, new SolidCurveIntersectionOptions
 					{
 						ResultType = SolidCurveIntersectionMode.CurveSegmentsInside
 					});
@@ -271,7 +322,7 @@ public class AvoidClashCmd : IExternalCommand
 					minT = Math.Min(minT, Math.Min(segmentStartT, segmentEndT));
 					maxT = Math.Max(maxT, Math.Max(segmentStartT, segmentEndT));
 					foundSolidIntersection = true;
-					if (TryGetBoundingBoxZ(solid.GetBoundingBox(), out double solidMinZ, out double solidMaxZ))
+					if (TryGetBoundingBoxZ(solidToTest.GetBoundingBox(), Transform.Identity, out double solidMinZ, out double solidMaxZ))
 					{
 						solidBottom = Math.Min(solidBottom, solidMinZ);
 						solidTop = Math.Max(solidTop, solidMaxZ);
@@ -295,27 +346,37 @@ public class AvoidClashCmd : IExternalCommand
 				obsTopZ = solidTop;
 				return true;
 			}
-			return TryGetBoundingBoxZ(obstacleBox, out obsBottomZ, out obsTopZ);
+			return TryGetBoundingBoxZ(obstacleBox, obstacleTransform, out obsBottomZ, out obsTopZ);
 		}
 
-		if (obstacleBox == null || !TryGetBoundingBoxZ(obstacleBox, out obsBottomZ, out obsTopZ)) return false;
+		if (obstacleBox == null || !TryGetBoundingBoxZ(obstacleBox, obstacleTransform, out obsBottomZ, out obsTopZ)) return false;
 		Line obstacleLine = (obstacle.Location as LocationCurve)?.Curve as Line;
+		if (obstacleLine != null && obstacleTransform != null && !obstacleTransform.IsIdentity)
+		{
+			try
+			{
+				obstacleLine = obstacleLine.CreateTransformed(obstacleTransform) as Line;
+			}
+			catch
+			{
+			}
+		}
 		if (obstacleLine != null)
 		{
 			FindClosestPointsBetweenLines(pipeLine, obstacleLine, out XYZ closestOnPipe, out XYZ closestOnObstacle);
-			if (TryGetLineBoundingBoxIntersection(pipeLine, obstacleBox, out pEntry, out pExit))
+			if (TryGetLineBoundingBoxIntersection(pipeLine, obstacleBox, obstacleTransform, out pEntry, out pExit))
 			{
 				return OrderCrossingPoints(pStart, pipeDir, ref pEntry, ref pExit);
 			}
 
-			double fallbackThickness = GetBoundingBoxWidthAlongDirection(obstacleBox, pipeDir);
+			double fallbackThickness = GetBoundingBoxWidthAlongDirection(obstacleBox, obstacleTransform, pipeDir);
 			if (fallbackThickness <= GeometryToleranceFeet) return false;
 			pEntry = closestOnPipe - pipeDir * fallbackThickness * 0.5;
 			pExit = closestOnPipe + pipeDir * fallbackThickness * 0.5;
 			return OrderCrossingPoints(pStart, pipeDir, ref pEntry, ref pExit);
 		}
 
-		return TryGetLineBoundingBoxIntersection(pipeLine, obstacleBox, out pEntry, out pExit)
+		return TryGetLineBoundingBoxIntersection(pipeLine, obstacleBox, obstacleTransform, out pEntry, out pExit)
 			&& OrderCrossingPoints(pStart, pipeDir, ref pEntry, ref pExit);
 	}
 
@@ -400,14 +461,19 @@ public class AvoidClashCmd : IExternalCommand
 		return true;
 	}
 
-	private static bool TryGetLineBoundingBoxIntersection(Line line, BoundingBoxXYZ box, out XYZ pEntry, out XYZ pExit)
+	private static bool TryGetLineBoundingBoxIntersection(Line line, BoundingBoxXYZ box, Transform obstacleTransform, out XYZ pEntry, out XYZ pExit)
 	{
 		pEntry = null;
 		pExit = null;
 		if (box == null) return false;
 		XYZ modelStart = line.GetEndPoint(0);
 		XYZ modelDir = (line.GetEndPoint(1) - modelStart).Normalize();
-		Transform inverse = box.Transform == null ? null : box.Transform.Inverse;
+		Transform transform = box.Transform;
+		if (obstacleTransform != null && !obstacleTransform.IsIdentity)
+		{
+			transform = transform == null ? obstacleTransform : obstacleTransform.Multiply(transform);
+		}
+		Transform inverse = transform?.Inverse;
 		XYZ localStart = inverse == null ? modelStart : inverse.OfPoint(modelStart);
 		XYZ localDir = inverse == null ? modelDir : inverse.OfVector(modelDir);
 		double entryT = 0.0;
@@ -452,12 +518,12 @@ public class AvoidClashCmd : IExternalCommand
 		return true;
 	}
 
-	private static bool TryGetBoundingBoxZ(BoundingBoxXYZ box, out double minZ, out double maxZ)
+	private static bool TryGetBoundingBoxZ(BoundingBoxXYZ box, Transform obstacleTransform, out double minZ, out double maxZ)
 	{
 		minZ = double.MaxValue;
 		maxZ = double.MinValue;
 		if (box == null) return false;
-		foreach (XYZ point in GetBoundingBoxCorners(box))
+		foreach (XYZ point in GetBoundingBoxCorners(box, obstacleTransform))
 		{
 			minZ = Math.Min(minZ, point.Z);
 			maxZ = Math.Max(maxZ, point.Z);
@@ -465,17 +531,17 @@ public class AvoidClashCmd : IExternalCommand
 		return minZ != double.MaxValue && maxZ != double.MinValue;
 	}
 
-	private static double GetObstacleWidthAlongDirection(Element obstacle, XYZ direction)
+	private static double GetObstacleWidthAlongDirection(Element obstacle, Transform obstacleTransform, XYZ direction)
 	{
-		return Math.Max(GetBoundingBoxWidthAlongDirection(obstacle.get_BoundingBox(null), direction), MinimumOffsetFeet);
+		return Math.Max(GetBoundingBoxWidthAlongDirection(obstacle.get_BoundingBox(null), obstacleTransform, direction), MinimumOffsetFeet);
 	}
 
-	private static double GetBoundingBoxWidthAlongDirection(BoundingBoxXYZ box, XYZ direction)
+	private static double GetBoundingBoxWidthAlongDirection(BoundingBoxXYZ box, Transform obstacleTransform, XYZ direction)
 	{
 		if (box == null) return 0.0;
 		double minProjection = double.MaxValue;
 		double maxProjection = double.MinValue;
-		foreach (XYZ point in GetBoundingBoxCorners(box))
+		foreach (XYZ point in GetBoundingBoxCorners(box, obstacleTransform))
 		{
 			double projection = point.DotProduct(direction);
 			minProjection = Math.Min(minProjection, projection);
@@ -484,9 +550,13 @@ public class AvoidClashCmd : IExternalCommand
 		return minProjection == double.MaxValue ? 0.0 : maxProjection - minProjection;
 	}
 
-	private static IEnumerable<XYZ> GetBoundingBoxCorners(BoundingBoxXYZ box)
+	private static IEnumerable<XYZ> GetBoundingBoxCorners(BoundingBoxXYZ box, Transform obstacleTransform = null)
 	{
 		Transform transform = box.Transform;
+		if (obstacleTransform != null && !obstacleTransform.IsIdentity)
+		{
+			transform = transform == null ? obstacleTransform : obstacleTransform.Multiply(transform);
+		}
 		double[] xs = { box.Min.X, box.Max.X };
 		double[] ys = { box.Min.Y, box.Max.Y };
 		double[] zs = { box.Min.Z, box.Max.Z };
@@ -603,21 +673,55 @@ public class AvoidClashCmd : IExternalCommand
 
 	private sealed class AvoidClashObstacleSelectionFilter : ISelectionFilter
 	{
+		private readonly Document _doc;
+
+		public AvoidClashObstacleSelectionFilter(Document doc)
+		{
+			_doc = doc;
+		}
+
 		public bool AllowElement(Element element)
 		{
-			if (element?.Category == null) return false;
-			int categoryId = element.Category.Id.GetIdInt();
+			if (element == null) return false;
+			if (element is RevitLinkInstance || element.Category?.Id.GetIdInt() == (int)BuiltInCategory.OST_RvtLinks) return true;
+			return IsValidObstacleCategory(element.Category);
+		}
+
+		public bool AllowReference(Reference reference, XYZ position)
+		{
+			if (reference == null) return false;
+			if (reference.LinkedElementId != null && reference.LinkedElementId != ElementId.InvalidElementId)
+			{
+				Element hostElem = _doc.GetElement(reference.ElementId);
+				if (hostElem is RevitLinkInstance linkInstance)
+				{
+					Document linkDoc = linkInstance.GetLinkDocument();
+					if (linkDoc != null)
+					{
+						Element linkedElem = linkDoc.GetElement(reference.LinkedElementId);
+						return linkedElem != null && IsValidObstacleCategory(linkedElem.Category);
+					}
+				}
+				return false;
+			}
+
+			Element elem = _doc.GetElement(reference.ElementId);
+			if (elem is RevitLinkInstance) return true;
+			return elem != null && IsValidObstacleCategory(elem.Category);
+		}
+
+		public static bool IsValidObstacleCategory(Category category)
+		{
+			if (category == null) return false;
+			int categoryId = category.Id.GetIdInt();
 			return categoryId == (int)BuiltInCategory.OST_StructuralFraming
+				|| categoryId == (int)BuiltInCategory.OST_StructuralColumns
+				|| categoryId == (int)BuiltInCategory.OST_StructuralFoundation
 				|| categoryId == (int)BuiltInCategory.OST_DuctCurves
 				|| categoryId == (int)BuiltInCategory.OST_PipeCurves
 				|| categoryId == (int)BuiltInCategory.OST_CableTray
 				|| categoryId == (int)BuiltInCategory.OST_Walls
 				|| categoryId == (int)BuiltInCategory.OST_Floors;
-		}
-
-		public bool AllowReference(Reference reference, XYZ position)
-		{
-			return true;
 		}
 	}
 }

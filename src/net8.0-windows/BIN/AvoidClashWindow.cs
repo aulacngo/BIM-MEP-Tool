@@ -8,6 +8,7 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
+using RevitTransform = Autodesk.Revit.DB.Transform;
 
 namespace BIN;
 
@@ -25,6 +26,7 @@ public class AvoidClashWindow : Window
 	private Document _doc;
 	private Element _runningPipeElem;
 	private Element _obstacleElem;
+	private RevitTransform _obstacleTransform;
 
 	private double _angleDegree = 45.0;
 	private BypassDirection _direction = BypassDirection.Up;
@@ -39,12 +41,13 @@ public class AvoidClashWindow : Window
 	private Button _btn45;
 	private Button _btn90;
 
-	public AvoidClashWindow(UIDocument uidoc, Element runningPipeElem, Element obstacleElem)
+	public AvoidClashWindow(UIDocument uidoc, Element runningPipeElem, Element obstacleElem, RevitTransform obstacleTransform = null)
 	{
 		_uidoc = uidoc;
 		_doc = uidoc.Document;
 		_runningPipeElem = runningPipeElem;
 		_obstacleElem = obstacleElem;
+		_obstacleTransform = obstacleTransform ?? RevitTransform.Identity;
 
 		Title = "BIM TOOL - AVOID CLASH (NE VA CHAM TU DONG)";
 		Width = 430;
@@ -90,8 +93,17 @@ public class AvoidClashWindow : Window
 			FontSize = 11,
 			Margin = new Thickness(0, 4, 0, 0)
 		};
+		TextBlock txtObstacle = new TextBlock
+		{
+			Text = "Vat can: " + (_obstacleElem?.Category?.Name ?? "Khong ro") + " - " + (_obstacleElem?.Name ?? "Khong ro"),
+			Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(191, 219, 254)),
+			FontSize = 10,
+			Margin = new Thickness(0, 3, 0, 0),
+			TextTrimming = TextTrimming.CharacterEllipsis
+		};
 		headerStack.Children.Add(txtTitle);
 		headerStack.Children.Add(txtSubtitle);
+		headerStack.Children.Add(txtObstacle);
 		header.Child = headerStack;
 		System.Windows.Controls.Grid.SetRow(header, 0);
 		root.Children.Add(header);
@@ -395,7 +407,7 @@ public class AvoidClashWindow : Window
 			_clearanceMm = Math.Max(10.0, val);
 		}
 
-		bool success = AvoidClashCmd.ExecuteBypass(_doc, _runningPipeElem, _obstacleElem, _angleDegree, _direction, _clearanceMm, out string err);
+		bool success = AvoidClashCmd.ExecuteBypass(_doc, _runningPipeElem, _obstacleElem, _obstacleTransform, _angleDegree, _direction, _clearanceMm, out string err);
 		if (success)
 		{
 			Close();
