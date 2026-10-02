@@ -23,33 +23,11 @@ public class PipeInsulationCmd : IExternalCommand
             List<InsulationTypeItem> insulationTypes = GetPipeInsulationTypes(doc);
             if (insulationTypes.Count == 0)
             {
-                TaskDialog.Show("BIM - Pipe Insulation", "Không tìm thấy Pipe Insulation Type nào trong dự án.\nVui lòng load Pipe Insulation Type trước khi sử dụng tool.");
+                TaskDialog.Show("BIM | Pipe Insulation", "Không tìm thấy Pipe Insulation Type nào trong dự án.\nVui lòng load Pipe Insulation Type trước khi sử dụng tool.");
                 return Result.Cancelled;
             }
 
-            List<string> viewSystemTypes = new FilteredElementCollector(doc, doc.ActiveView.Id)
-                .OfCategory(BuiltInCategory.OST_PipeCurves)
-                .WhereElementIsNotElementType()
-                .Cast<Pipe>()
-                .Select(pipe => PipeInsulationRules.SystemName(pipe))
-                .Where(systemName => !string.IsNullOrWhiteSpace(systemName))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(systemName => systemName)
-                .ToList();
-
-            if (viewSystemTypes.Count == 0)
-            {
-                viewSystemTypes = new FilteredElementCollector(doc)
-                    .OfClass(typeof(PipingSystemType))
-                    .Cast<PipingSystemType>()
-                    .Select(systemType => systemType.Name)
-                    .Where(systemName => !string.IsNullOrWhiteSpace(systemName))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .OrderBy(systemName => systemName)
-                    .ToList();
-            }
-
-            PipeInsulationWindow ui = new PipeInsulationWindow(insulationTypes, viewSystemTypes);
+            PipeInsulationWindow ui = new PipeInsulationWindow(insulationTypes, GetSystemOptionsInActiveView(doc));
             if (ui.ShowDialog() != true)
             {
                 return Result.Cancelled;
@@ -58,7 +36,7 @@ public class PipeInsulationCmd : IExternalCommand
             ElementId insulationTypeId = ui.SelectedInsulationType.Tag as ElementId;
             if (insulationTypeId == null)
             {
-                TaskDialog.Show("BIM - Pipe Insulation", "Insulation Type được chọn không hợp lệ.");
+                TaskDialog.Show("BIM | Pipe Insulation", "Insulation Type được chọn không hợp lệ.");
                 return Result.Cancelled;
             }
 
@@ -153,15 +131,7 @@ public class PipeInsulationCmd : IExternalCommand
                 }
             }
 
-            string resultMessage = "Hoàn thành!\n" +
-                "• Phạm vi: " + ScopeDescription(ui) + "\n" +
-                "• Đã bọc insulation: " + insulatedCount + " phần tử\n" +
-                "• Bỏ qua: " + skippedCount + " phần tử";
-            if (ui.RemoveExisting)
-            {
-                resultMessage += "\n• Đã xóa insulation cũ: " + removedCount;
-            }
-            TaskDialog.Show("BIM - Pipe Insulation", resultMessage);
+            ShowCompletionDialog(ui, pipeElements.Count, fittingElements.Count, insulatedCount, skippedCount, removedCount);
             return Result.Succeeded;
         }
         catch (Autodesk.Revit.Exceptions.OperationCanceledException)
@@ -171,9 +141,50 @@ public class PipeInsulationCmd : IExternalCommand
         catch (Exception exception)
         {
             message = exception.Message;
-            TaskDialog.Show("BIM TOOL - Error", exception.ToString());
+            TaskDialog.Show("BIM TOOL | Error", exception.ToString());
             return Result.Failed;
         }
+    }
+
+    private static List<PipeInsulationSystemOption> GetSystemOptionsInActiveView(Document doc)
+    {
+        return new FilteredElementCollector(doc, doc.ActiveView.Id)
+            .OfCategory(BuiltInCategory.OST_PipeCurves)
+            .WhereElementIsNotElementType()
+            .Cast<Pipe>()
+            .Select(pipe => PipeInsulationRules.SystemName(pipe))
+            .Where(systemName => !string.IsNullOrWhiteSpace(systemName))
+            .GroupBy(systemName => systemName, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new PipeInsulationSystemOption
+            {
+                SystemName = group.First(),
+                PipeCount = group.Count()
+            })
+            .OrderBy(option => option.SystemName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static void ShowCompletionDialog(
+        PipeInsulationWindow ui,
+        int pipeCount,
+        int fittingCount,
+        int insulatedCount,
+        int skippedCount,
+        int removedCount)
+    {
+        TaskDialog dialog = new TaskDialog("BIM | Pipe Insulation")
+        {
+            MainInstruction = "Đã hoàn thành áp dụng insulation",
+            MainContent = "Đã bọc insulation: " + insulatedCount + " phần tử\n" +
+                          "Bỏ qua: " + skippedCount + " phần tử",
+            ExpandedContent = "Phạm vi: " + ScopeDescription(ui) + "\n" +
+                              "Preset: " + ui.SelectedPresetName + "\n" +
+                              "Đối tượng trong phạm vi: " + pipeCount + " ống, " + fittingCount + " fitting" +
+                              (ui.RemoveExisting ? "\nĐã xóa insulation cũ: " + removedCount : string.Empty),
+            MainIcon = TaskDialogIcon.TaskDialogIconInformation,
+            CommonButtons = TaskDialogCommonButtons.Ok
+        };
+        dialog.Show();
     }
 
     private static Result GetTargetElements(
@@ -231,7 +242,7 @@ public class PipeInsulationCmd : IExternalCommand
             if (pipeElements.Count == 0 && fittingElements.Count == 0)
             {
                 TaskDialog.Show(
-                    "BIM - Pipe Insulation",
+                    "BIM | Pipe Insulation",
                     "Không có Pipe hoặc Pipe Fitting thuộc System Type '" + ui.SelectedSystemType + "' trong view hiện tại.");
                 return Result.Cancelled;
             }
@@ -239,7 +250,7 @@ public class PipeInsulationCmd : IExternalCommand
 
         if (pipeElements.Count == 0 && fittingElements.Count == 0)
         {
-            TaskDialog.Show("BIM - Pipe Insulation", "Không có Pipe hoặc Pipe Fitting nào trong phạm vi đã chọn.");
+            TaskDialog.Show("BIM | Pipe Insulation", "Không có Pipe hoặc Pipe Fitting nào trong phạm vi đã chọn.");
             return Result.Cancelled;
         }
 
@@ -286,7 +297,7 @@ public class PipeInsulationCmd : IExternalCommand
         switch (ui.SelectedScope)
         {
             case PipeInsulationScope.AllInView:
-                return "Tất cả đường trong View";
+                return "Tất cả đường ống trong View";
             case PipeInsulationScope.SelectedPipes:
                 return "Đường ống đang chọn";
             default:

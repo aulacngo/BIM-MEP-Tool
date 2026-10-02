@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Plumbing;
 
@@ -15,21 +16,102 @@ public sealed class PipeInsulationRule
 
 public static class PipeInsulationRules
 {
-    public static List<PipeInsulationRule> DefaultC1()
+    public const string ChillerC1PresetKey = "chiller-c1";
+    public const string CondensateC1PresetKey = "condensate-c1";
+    public const string HotWaterPresetKey = "hot-water";
+    public const string AllC1PresetKey = "all-c1";
+    public const string UserCustomPresetKey = "user-custom";
+
+    // DN 10000 is the editable representation of "DN200+". It covers practical
+    // project pipe sizes without requiring a special value in the rule grid.
+    private const double OpenEndedDn = 10000.0;
+
+    public static List<PipeInsulationRule> DefaultChillerC1()
     {
         return new List<PipeInsulationRule>
         {
-            new PipeInsulationRule { System = "CHWS/CHWR", MinDN = 20, MaxDN = 40, ThicknessMM = 32 },
-            new PipeInsulationRule { System = "CHWS/CHWR", MinDN = 50, MaxDN = 150, ThicknessMM = 40 },
-            new PipeInsulationRule { System = "CHWS/CHWR", MinDN = 200, MaxDN = 500, ThicknessMM = 50 },
-            new PipeInsulationRule { System = "CDP/CONDENSATE", MinDN = 20, MaxDN = 65, ThicknessMM = 19 },
-            new PipeInsulationRule { System = "CDP/CONDENSATE", MinDN = 80, MaxDN = 500, ThicknessMM = 25 }
+            new PipeInsulationRule { System = "CHWS/CHWR/CHILLER/CHILLED WATER", MinDN = 20, MaxDN = 40, ThicknessMM = 32 },
+            new PipeInsulationRule { System = "CHWS/CHWR/CHILLER/CHILLED WATER", MinDN = 50, MaxDN = 150, ThicknessMM = 40 },
+            new PipeInsulationRule { System = "CHWS/CHWR/CHILLER/CHILLED WATER", MinDN = 200, MaxDN = OpenEndedDn, ThicknessMM = 50 }
         };
+    }
+
+    public static List<PipeInsulationRule> DefaultCondensateC1()
+    {
+        return new List<PipeInsulationRule>
+        {
+            new PipeInsulationRule { System = "CDP/CONDENSATE/DRAIN", MinDN = 20, MaxDN = 65, ThicknessMM = 19 },
+            new PipeInsulationRule { System = "CDP/CONDENSATE/DRAIN", MinDN = 80, MaxDN = OpenEndedDn, ThicknessMM = 25 }
+        };
+    }
+
+    public static List<PipeInsulationRule> DefaultHotWater()
+    {
+        return new List<PipeInsulationRule>
+        {
+            new PipeInsulationRule { System = "DHW/HOT WATER", MinDN = 15, MaxDN = 32, ThicknessMM = 25 },
+            new PipeInsulationRule { System = "DHW/HOT WATER", MinDN = 40, MaxDN = 65, ThicknessMM = 32 },
+            new PipeInsulationRule { System = "DHW/HOT WATER", MinDN = 80, MaxDN = OpenEndedDn, ThicknessMM = 40 }
+        };
+    }
+
+    public static List<PipeInsulationRule> DefaultAllC1()
+    {
+        List<PipeInsulationRule> rules = DefaultChillerC1();
+        rules.AddRange(DefaultCondensateC1());
+        rules.AddRange(DefaultHotWater());
+        return rules;
+    }
+
+    // Kept for callers and existing user settings created before the preset UI.
+    public static List<PipeInsulationRule> DefaultC1()
+    {
+        return DefaultAllC1();
+    }
+
+    public static List<PipeInsulationRule> DefaultForPreset(string presetKey)
+    {
+        if (string.Equals(presetKey, ChillerC1PresetKey, StringComparison.OrdinalIgnoreCase))
+        {
+            return DefaultChillerC1();
+        }
+
+        if (string.Equals(presetKey, CondensateC1PresetKey, StringComparison.OrdinalIgnoreCase))
+        {
+            return DefaultCondensateC1();
+        }
+
+        if (string.Equals(presetKey, HotWaterPresetKey, StringComparison.OrdinalIgnoreCase))
+        {
+            return DefaultHotWater();
+        }
+
+        return DefaultAllC1();
+    }
+
+    public static string SuggestedPresetKey(string systemName)
+    {
+        if (Matches(systemName, "CHWS/CHWR/CHILLER/CHILLED WATER"))
+        {
+            return ChillerC1PresetKey;
+        }
+
+        if (Matches(systemName, "CDP/CONDENSATE/DRAIN"))
+        {
+            return CondensateC1PresetKey;
+        }
+
+        if (Matches(systemName, "DHW/HOT WATER"))
+        {
+            return HotWaterPresetKey;
+        }
+
+        return null;
     }
 
     public static double GetThicknessMm(Pipe pipe)
     {
-        return GetThicknessMm(pipe, DefaultC1());
+        return GetThicknessMm(pipe, DefaultAllC1());
     }
 
     public static double GetThicknessMm(Pipe pipe, IEnumerable<PipeInsulationRule> rules)
@@ -43,9 +125,10 @@ public static class PipeInsulationRules
     }
 
     /// <summary>
-    /// Matches a system name against a rule pattern. A rule may list alternatives
-    /// with comma, semicolon, or slash. ALL and OTHER are fallback wildcards; the
-    /// caller resolves specific rules before considering them.
+    /// Matches a Revit system name against one or more rule alternatives. Besides
+    /// comma/slash/semicolon alternatives, common MEP aliases are treated as the
+    /// same system family: CHWS/CHWR/Chilled Water, CDP/Condensate/Drain, and
+    /// DHW/Hot Water. This keeps factory presets useful with project-specific names.
     /// </summary>
     public static bool Matches(string actual, string pattern)
     {
@@ -54,15 +137,27 @@ public static class PipeInsulationRules
             return true;
         }
 
-        string actualName = (actual ?? string.Empty).Trim();
-        string[] alternatives = (pattern ?? string.Empty).Split(new[] { ',', ';', '/' }, StringSplitOptions.RemoveEmptyEntries);
-
-        foreach (string alternative in alternatives)
+        List<string> actualAlternatives = SplitAlternatives(actual).ToList();
+        List<string> patternAlternatives = SplitAlternatives(pattern).ToList();
+        if (actualAlternatives.Count == 0 || patternAlternatives.Count == 0)
         {
-            string candidate = alternative.Trim();
-            if (candidate.Length > 0 &&
-                (actualName.Equals(candidate, StringComparison.OrdinalIgnoreCase) ||
-                 actualName.IndexOf(candidate, StringComparison.OrdinalIgnoreCase) >= 0))
+            return false;
+        }
+
+        foreach (string actualAlternative in actualAlternatives)
+        {
+            foreach (string patternAlternative in patternAlternatives)
+            {
+                if (IsFuzzyMatch(actualAlternative, patternAlternative))
+                {
+                    return true;
+                }
+            }
+        }
+
+        foreach (string[] aliases in SystemAliasGroups)
+        {
+            if (ContainsAnyAlias(actualAlternatives, aliases) && ContainsAnyAlias(patternAlternatives, aliases))
             {
                 return true;
             }
@@ -104,6 +199,59 @@ public static class PipeInsulationRules
         }
 
         return systemName;
+    }
+
+    private static readonly string[][] SystemAliasGroups =
+    {
+        new[] { "CHWS", "CHWR", "CHW", "CHILLER", "CHILLED WATER", "CHILLED" },
+        new[] { "CDP", "CONDENSATE", "CONDENSATION", "DRAIN", "DRAINAGE" },
+        new[] { "DHW", "HOT WATER", "HOTWATER" }
+    };
+
+    private static IEnumerable<string> SplitAlternatives(string value)
+    {
+        return (value ?? string.Empty)
+            .Split(new[] { ',', ';', '/', '|', '\\' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(item => item.Trim())
+            .Where(item => item.Length > 0);
+    }
+
+    private static bool IsFuzzyMatch(string actual, string pattern)
+    {
+        string normalizedActual = Normalize(actual);
+        string normalizedPattern = Normalize(pattern);
+        if (normalizedActual.Length == 0 || normalizedPattern.Length == 0)
+        {
+            return false;
+        }
+
+        return normalizedActual.Equals(normalizedPattern, StringComparison.Ordinal) ||
+               normalizedActual.IndexOf(normalizedPattern, StringComparison.Ordinal) >= 0 ||
+               normalizedPattern.IndexOf(normalizedActual, StringComparison.Ordinal) >= 0;
+    }
+
+    private static bool ContainsAnyAlias(IEnumerable<string> values, IEnumerable<string> aliases)
+    {
+        foreach (string value in values)
+        {
+            foreach (string alias in aliases)
+            {
+                if (IsFuzzyMatch(value, alias))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static string Normalize(string value)
+    {
+        return new string((value ?? string.Empty)
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToUpperInvariant)
+            .ToArray());
     }
 
     private static double GetThicknessMm(string systemName, double diameterMm, IEnumerable<PipeInsulationRule> rules)

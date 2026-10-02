@@ -4,9 +4,11 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Media;
 
@@ -19,194 +21,396 @@ public enum PipeInsulationScope
     BySystemType = 2
 }
 
+/// <summary>One pipe system in the active view, with its pipe count kept separate from the display label.</summary>
+public sealed class PipeInsulationSystemOption
+{
+    public string SystemName { get; set; }
+    public int PipeCount { get; set; }
+
+    public string DisplayName
+    {
+        get { return string.Format(CultureInfo.CurrentCulture, "{0} ({1} ống)", SystemName, PipeCount); }
+    }
+}
+
+internal sealed class PipeInsulationPresetItem
+{
+    public string Key { get; set; }
+    public string DisplayName { get; set; }
+    public bool IsUserCustom { get; set; }
+
+    public override string ToString()
+    {
+        return DisplayName;
+    }
+}
+
 /// <summary>Rule editor built entirely in C# WPF; it has no XAML/BAML dependency.</summary>
 public sealed class PipeInsulationWindow : Window
 {
     private const string EmptySystemTypeMessage = "Không có hệ thống nào trong view";
-    private static readonly string FileName = Path.Combine(
+    private static readonly string SettingsDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "BIN_PipeInsulation",
-        "system_rules.json");
+        "BIN_PipeInsulation");
+    private static readonly string PresetFileName = Path.Combine(SettingsDirectory, "presets.json");
+    private static readonly string LegacyRulesFileName = Path.Combine(SettingsDirectory, "system_rules.json");
 
     private readonly ComboBox insulationTypeComboBox;
     private readonly ComboBox systemTypeComboBox;
+    private readonly ComboBox presetComboBox;
     private readonly CheckBox removeExistingCheckBox;
     private readonly RadioButton allInViewRadioButton;
     private readonly RadioButton selectedPipesRadioButton;
     private readonly RadioButton bySystemTypeRadioButton;
+    private readonly DataGrid rulesGrid;
+    private readonly TextBlock presetStatusText;
+    private readonly List<PipeInsulationPresetItem> presetItems;
+
+    private List<PipeInsulationRule> savedUserCustomRules;
+    private bool isLoadingPreset;
 
     public ObservableCollection<PipeInsulationRule> Rules { get; private set; }
     public InsulationTypeItem SelectedInsulationType { get; private set; }
     public bool RemoveExisting { get; private set; }
     public PipeInsulationScope SelectedScope { get; private set; }
     public string SelectedSystemType { get; private set; }
+    public string SelectedPresetName { get; private set; }
 
-    public PipeInsulationWindow(List<InsulationTypeItem> insulationTypes, List<string> availableSystemTypes)
+    public PipeInsulationWindow(List<InsulationTypeItem> insulationTypes, List<PipeInsulationSystemOption> availableSystemTypes)
     {
-        Title = "BIM - Pipe Insulation";
-        Width = 860;
-        Height = 610;
-        MinWidth = 720;
-        MinHeight = 480;
+        Title = "BIM | Pipe Insulation";
+        Width = 960;
+        Height = 720;
+        MinWidth = 880;
+        MinHeight = 640;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         ResizeMode = ResizeMode.CanResize;
+        Background = Brushes.White;
+        FontFamily = new FontFamily("Segoe UI");
 
-        Rules = new ObservableCollection<PipeInsulationRule>(LoadRules());
+        savedUserCustomRules = LoadUserCustomRules();
+        Rules = new ObservableCollection<PipeInsulationRule>();
+        presetItems = CreatePresetItems();
 
-        Grid root = new Grid { Margin = new Thickness(16) };
+        Grid root = new Grid { Margin = new Thickness(18) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         Content = root;
 
-        WrapPanel topBar = new WrapPanel { Margin = new Thickness(0, 0, 0, 12) };
-        topBar.Children.Add(new TextBlock
-        {
-            Text = "Insulation Type:",
-            VerticalAlignment = VerticalAlignment.Center,
-            FontWeight = FontWeights.SemiBold,
-            Margin = new Thickness(0, 0, 6, 0)
-        });
+        Border header = CreateHeader();
+        Grid.SetRow(header, 0);
+        root.Children.Add(header);
 
+        Border setupCard = CreateCard(new Grid(), new Thickness(0, 12, 0, 12));
+        Grid setupGrid = (Grid)setupCard.Child;
+        setupGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(285) });
+        setupGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
+        setupGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        StackPanel materialPanel = new StackPanel();
+        materialPanel.Children.Add(CreateSectionTitle("Thiết lập insulation"));
+        materialPanel.Children.Add(CreateFieldLabel("Loại insulation"));
         insulationTypeComboBox = new ComboBox
         {
-            Width = 260,
-            MinHeight = 28,
+            MinHeight = 32,
             ItemsSource = insulationTypes ?? new List<InsulationTypeItem>(),
-            Margin = new Thickness(0, 0, 20, 0)
+            DisplayMemberPath = "Name",
+            Margin = new Thickness(0, 0, 0, 10)
         };
         if (insulationTypeComboBox.Items.Count > 0)
         {
             insulationTypeComboBox.SelectedIndex = 0;
         }
-        topBar.Children.Add(insulationTypeComboBox);
-
+        materialPanel.Children.Add(insulationTypeComboBox);
         removeExistingCheckBox = new CheckBox
         {
-            Content = "Xóa insulation cũ",
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 2, 0, 2)
+            Content = "Thay thế insulation hiện có trong phạm vi",
+            Margin = new Thickness(0, 2, 0, 0),
+            Foreground = new SolidColorBrush(Color.FromRgb(58, 69, 84))
         };
-        topBar.Children.Add(removeExistingCheckBox);
-        Grid.SetRow(topBar, 0);
-        root.Children.Add(topBar);
+        materialPanel.Children.Add(removeExistingCheckBox);
+        Grid.SetColumn(materialPanel, 0);
+        setupGrid.Children.Add(materialPanel);
 
-        Border scopeBorder = new Border
-        {
-            BorderBrush = new SolidColorBrush(Color.FromRgb(210, 218, 230)),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(5),
-            Background = new SolidColorBrush(Color.FromRgb(248, 250, 253)),
-            Padding = new Thickness(12),
-            Margin = new Thickness(0, 0, 0, 12)
-        };
         StackPanel scopePanel = new StackPanel();
-        scopePanel.Children.Add(new TextBlock
-        {
-            Text = "Phạm vi áp dụng (Scope):",
-            FontWeight = FontWeights.SemiBold,
-            Margin = new Thickness(0, 0, 0, 8)
-        });
-
-        allInViewRadioButton = new RadioButton
-        {
-            Content = "Tất cả đường trong View",
-            GroupName = "scope",
-            Margin = new Thickness(0, 1, 0, 1)
-        };
-        selectedPipesRadioButton = new RadioButton
-        {
-            Content = "Đường ống đang chọn",
-            GroupName = "scope",
-            Margin = new Thickness(0, 1, 0, 1)
-        };
+        scopePanel.Children.Add(CreateSectionTitle("Phạm vi áp dụng"));
         bySystemTypeRadioButton = new RadioButton
         {
-            Content = "Theo System Type:",
-            GroupName = "scope",
+            Content = "Theo System Type (Khuyến dùng)",
+            GroupName = "pipeInsulationScope",
+            Margin = new Thickness(0, 0, 0, 5),
             IsChecked = true,
-            Margin = new Thickness(0, 1, 0, 4)
+            FontWeight = FontWeights.SemiBold
         };
-        scopePanel.Children.Add(allInViewRadioButton);
-        scopePanel.Children.Add(selectedPipesRadioButton);
         scopePanel.Children.Add(bySystemTypeRadioButton);
 
         systemTypeComboBox = new ComboBox
         {
-            Name = "cboSystemType",
-            MinHeight = 28,
-            MinWidth = 360,
-            HorizontalAlignment = HorizontalAlignment.Left,
-            Margin = new Thickness(22, 0, 0, 0)
+            MinHeight = 32,
+            Margin = new Thickness(23, 0, 0, 8),
+            DisplayMemberPath = "DisplayName"
         };
-        List<string> systemTypes = (availableSystemTypes ?? new List<string>())
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
+        List<PipeInsulationSystemOption> systemOptions = (availableSystemTypes ?? new List<PipeInsulationSystemOption>())
+            .Where(option => option != null && !string.IsNullOrWhiteSpace(option.SystemName))
+            .GroupBy(option => option.SystemName, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new PipeInsulationSystemOption
+            {
+                SystemName = group.First().SystemName,
+                PipeCount = group.Sum(option => option.PipeCount)
+            })
+            .OrderBy(option => option.SystemName, StringComparer.OrdinalIgnoreCase)
             .ToList();
-        if (systemTypes.Count == 0)
+        if (systemOptions.Count == 0)
         {
-            systemTypes.Add(EmptySystemTypeMessage);
+            systemOptions.Add(new PipeInsulationSystemOption { SystemName = EmptySystemTypeMessage, PipeCount = 0 });
         }
-        systemTypeComboBox.ItemsSource = systemTypes;
+        systemTypeComboBox.ItemsSource = systemOptions;
         systemTypeComboBox.SelectedIndex = 0;
         scopePanel.Children.Add(systemTypeComboBox);
 
-        allInViewRadioButton.Checked += ScopeRadioButtonChecked;
-        selectedPipesRadioButton.Checked += ScopeRadioButtonChecked;
-        bySystemTypeRadioButton.Checked += ScopeRadioButtonChecked;
-        UpdateSystemTypeEnabledState();
-
-        scopeBorder.Child = scopePanel;
-        Grid.SetRow(scopeBorder, 1);
-        root.Children.Add(scopeBorder);
-
-        DataGrid rulesGrid = new DataGrid
+        selectedPipesRadioButton = new RadioButton
         {
-            ItemsSource = Rules,
-            AutoGenerateColumns = false,
-            CanUserAddRows = true,
-            CanUserDeleteRows = true,
-            HeadersVisibility = DataGridHeadersVisibility.Column,
-            Margin = new Thickness(0, 0, 0, 12),
-            GridLinesVisibility = DataGridGridLinesVisibility.Horizontal,
-            AlternatingRowBackground = new SolidColorBrush(Color.FromRgb(247, 249, 252))
+            Content = "Đường ống đang chọn (hoặc chọn trực tiếp nếu chưa chọn)",
+            GroupName = "pipeInsulationScope",
+            Margin = new Thickness(0, 0, 0, 5)
         };
-        rulesGrid.Columns.Add(CreateTextColumn("System", "System", 2));
-        rulesGrid.Columns.Add(CreateTextColumn("MinDN (mm)", "MinDN", 1));
-        rulesGrid.Columns.Add(CreateTextColumn("MaxDN (mm)", "MaxDN", 1));
-        rulesGrid.Columns.Add(CreateTextColumn("ThicknessMM (mm)", "ThicknessMM", 1));
-        Grid.SetRow(rulesGrid, 2);
-        root.Children.Add(rulesGrid);
+        scopePanel.Children.Add(selectedPipesRadioButton);
+        allInViewRadioButton = new RadioButton
+        {
+            Content = "Tất cả đường ống trong View",
+            GroupName = "pipeInsulationScope"
+        };
+        scopePanel.Children.Add(allInViewRadioButton);
+        Grid.SetColumn(scopePanel, 2);
+        setupGrid.Children.Add(scopePanel);
 
-        StackPanel bottomBar = new StackPanel
+        Grid.SetRow(setupCard, 1);
+        root.Children.Add(setupCard);
+
+        Grid presetGrid = new Grid();
+        presetGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        presetGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        presetGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        presetStatusText = new TextBlock
+        {
+            Foreground = new SolidColorBrush(Color.FromRgb(83, 96, 112)),
+            FontSize = 12,
+            Margin = new Thickness(0, 6, 0, 8),
+            Text = "Chọn một preset theo hệ thống, sau đó tinh chỉnh bảng khi cần. Lưu sẽ cập nhật preset Tùy chỉnh của người dùng."
+        };
+
+        Grid presetToolbar = new Grid();
+        presetToolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        presetToolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        presetToolbar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        presetToolbar.Children.Add(CreateSectionTitle("Bảng quy tắc / Preset", new Thickness(0, 0, 12, 0)));
+        presetComboBox = new ComboBox
+        {
+            MinHeight = 32,
+            MinWidth = 220,
+            ItemsSource = presetItems,
+            DisplayMemberPath = "DisplayName",
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Grid.SetColumn(presetComboBox, 1);
+        presetToolbar.Children.Add(presetComboBox);
+
+        StackPanel presetActions = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Right
         };
-        Button resetButton = CreateButton("Nạp lại chuẩn C1", null);
-        resetButton.Click += delegate
+        Button savePresetButton = CreateButton("Lưu Preset này", ButtonKind.Secondary);
+        savePresetButton.Click += SavePresetButtonClicked;
+        presetActions.Children.Add(savePresetButton);
+        Button reloadPresetButton = CreateButton("Nạp lại chuẩn C1", ButtonKind.Secondary);
+        reloadPresetButton.Click += ReloadPresetButtonClicked;
+        presetActions.Children.Add(reloadPresetButton);
+        Button addRowButton = CreateButton("+ Thêm dòng", ButtonKind.Secondary);
+        addRowButton.Click += AddRowButtonClicked;
+        presetActions.Children.Add(addRowButton);
+        Button deleteRowButton = CreateButton("Xóa dòng", ButtonKind.Secondary);
+        deleteRowButton.Click += DeleteRowButtonClicked;
+        presetActions.Children.Add(deleteRowButton);
+        Grid.SetColumn(presetActions, 2);
+        presetToolbar.Children.Add(presetActions);
+        presetGrid.Children.Add(presetToolbar);
+        Grid.SetRow(presetStatusText, 1);
+        presetGrid.Children.Add(presetStatusText);
+
+        rulesGrid = CreateRulesGrid();
+        Grid.SetRow(rulesGrid, 2);
+        presetGrid.Children.Add(rulesGrid);
+        Border presetCard = CreateCard(presetGrid, new Thickness(0));
+        Grid.SetRow(presetCard, 2);
+        root.Children.Add(presetCard);
+
+        StackPanel bottomBar = new StackPanel
         {
-            Rules.Clear();
-            foreach (PipeInsulationRule rule in PipeInsulationRules.DefaultC1())
-            {
-                Rules.Add(rule);
-            }
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 12, 0, 0)
         };
-        bottomBar.Children.Add(resetButton);
-
-        Button applyButton = CreateButton("Áp dụng", new SolidColorBrush(Color.FromRgb(0, 120, 212)));
-        applyButton.IsDefault = true;
-        applyButton.Click += ApplyButtonClicked;
-        bottomBar.Children.Add(applyButton);
-
-        Button cancelButton = CreateButton("Hủy", null);
+        Button cancelButton = CreateButton("Hủy", ButtonKind.Secondary);
         cancelButton.IsCancel = true;
         cancelButton.Click += delegate { Close(); };
         bottomBar.Children.Add(cancelButton);
+        Button applyButton = CreateButton("Áp dụng insulation", ButtonKind.Primary);
+        applyButton.IsDefault = true;
+        applyButton.Click += ApplyButtonClicked;
+        bottomBar.Children.Add(applyButton);
         Grid.SetRow(bottomBar, 3);
         root.Children.Add(bottomBar);
+
+        allInViewRadioButton.Checked += ScopeRadioButtonChecked;
+        selectedPipesRadioButton.Checked += ScopeRadioButtonChecked;
+        bySystemTypeRadioButton.Checked += ScopeRadioButtonChecked;
+        systemTypeComboBox.SelectionChanged += SystemTypeComboBoxSelectionChanged;
+        presetComboBox.SelectionChanged += PresetComboBoxSelectionChanged;
+
+        PipeInsulationPresetItem initialPreset = savedUserCustomRules.Count > 0
+            ? FindPreset(PipeInsulationRules.UserCustomPresetKey)
+            : FindPreset(PipeInsulationRules.AllC1PresetKey);
+        SelectPreset(initialPreset, false);
+        AutoSwitchPresetForSelectedSystem();
+        UpdateSystemTypeEnabledState();
+    }
+
+    private static Border CreateHeader()
+    {
+        Border header = new Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(16, 67, 122)),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(20, 15, 20, 15)
+        };
+        StackPanel headerContent = new StackPanel();
+        headerContent.Children.Add(new TextBlock
+        {
+            Text = "PIPE INSULATION",
+            Foreground = Brushes.White,
+            FontSize = 21,
+            FontWeight = FontWeights.SemiBold
+        });
+        headerContent.Children.Add(new TextBlock
+        {
+            Text = "Chọn phạm vi • chọn preset tiêu chuẩn • kiểm tra và áp dụng",
+            Foreground = new SolidColorBrush(Color.FromRgb(218, 233, 250)),
+            FontSize = 12,
+            Margin = new Thickness(0, 3, 0, 0)
+        });
+        header.Child = headerContent;
+        return header;
+    }
+
+    private static Border CreateCard(UIElement child, Thickness margin)
+    {
+        return new Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(251, 252, 254)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(218, 225, 234)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(7),
+            Padding = new Thickness(16),
+            Margin = margin,
+            Child = child
+        };
+    }
+
+    private static TextBlock CreateSectionTitle(string text)
+    {
+        return CreateSectionTitle(text, new Thickness(0, 0, 0, 8));
+    }
+
+    private static TextBlock CreateSectionTitle(string text, Thickness margin)
+    {
+        return new TextBlock
+        {
+            Text = text,
+            FontSize = 14,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = new SolidColorBrush(Color.FromRgb(31, 45, 61)),
+            Margin = margin,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+    }
+
+    private static TextBlock CreateFieldLabel(string text)
+    {
+        return new TextBlock
+        {
+            Text = text,
+            FontSize = 12,
+            Foreground = new SolidColorBrush(Color.FromRgb(83, 96, 112)),
+            Margin = new Thickness(0, 0, 0, 4)
+        };
+    }
+
+    private enum ButtonKind
+    {
+        Primary,
+        Secondary
+    }
+
+    private static Button CreateButton(string content, ButtonKind kind)
+    {
+        bool primary = kind == ButtonKind.Primary;
+        SolidColorBrush primaryBrush = new SolidColorBrush(Color.FromRgb(0, 103, 192));
+        return new Button
+        {
+            Content = content,
+            Padding = new Thickness(13, 6, 13, 6),
+            Margin = new Thickness(5, 0, 0, 0),
+            MinHeight = 32,
+            Background = primary ? primaryBrush : new SolidColorBrush(Color.FromRgb(242, 245, 248)),
+            Foreground = primary ? Brushes.White : new SolidColorBrush(Color.FromRgb(42, 55, 70)),
+            BorderBrush = primary ? primaryBrush : new SolidColorBrush(Color.FromRgb(199, 209, 220))
+        };
+    }
+
+    private static List<PipeInsulationPresetItem> CreatePresetItems()
+    {
+        return new List<PipeInsulationPresetItem>
+        {
+            new PipeInsulationPresetItem { Key = PipeInsulationRules.ChillerC1PresetKey, DisplayName = "Hệ Chiller (CHWS/CHWR) - Chuẩn C1" },
+            new PipeInsulationPresetItem { Key = PipeInsulationRules.CondensateC1PresetKey, DisplayName = "Hệ Nước Ngưng (Condensate/CDP) - Chuẩn C1" },
+            new PipeInsulationPresetItem { Key = PipeInsulationRules.HotWaterPresetKey, DisplayName = "Hệ Nước Nóng (DHW/Hot Water)" },
+            new PipeInsulationPresetItem { Key = PipeInsulationRules.AllC1PresetKey, DisplayName = "Tất cả các hệ thống (Multi-System)" },
+            new PipeInsulationPresetItem { Key = PipeInsulationRules.UserCustomPresetKey, DisplayName = "Tùy chỉnh của người dùng (User Custom)", IsUserCustom = true }
+        };
+    }
+
+    private DataGrid CreateRulesGrid()
+    {
+        DataGrid grid = new DataGrid
+        {
+            ItemsSource = Rules,
+            AutoGenerateColumns = false,
+            CanUserAddRows = false,
+            CanUserDeleteRows = false,
+            CanUserReorderColumns = false,
+            HeadersVisibility = DataGridHeadersVisibility.Column,
+            GridLinesVisibility = DataGridGridLinesVisibility.Horizontal,
+            AlternatingRowBackground = new SolidColorBrush(Color.FromRgb(246, 249, 252)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(218, 225, 234)),
+            BorderThickness = new Thickness(1),
+            SelectionMode = DataGridSelectionMode.Single,
+            SelectionUnit = DataGridSelectionUnit.FullRow,
+            RowHeight = 30
+        };
+        Style headerStyle = new Style(typeof(DataGridColumnHeader));
+        headerStyle.Setters.Add(new Setter(Control.BackgroundProperty, new SolidColorBrush(Color.FromRgb(232, 239, 247))));
+        headerStyle.Setters.Add(new Setter(Control.ForegroundProperty, new SolidColorBrush(Color.FromRgb(37, 56, 76))));
+        headerStyle.Setters.Add(new Setter(Control.FontWeightProperty, FontWeights.SemiBold));
+        headerStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(8, 6, 8, 6)));
+        grid.ColumnHeaderStyle = headerStyle;
+        grid.Columns.Add(CreateTextColumn("Hệ thống", "System", 2.4));
+        grid.Columns.Add(CreateTextColumn("Từ DN (mm)", "MinDN", 1));
+        grid.Columns.Add(CreateTextColumn("Đến DN (mm)", "MaxDN", 1));
+        grid.Columns.Add(CreateTextColumn("Độ dày (mm)", "ThicknessMM", 1));
+        return grid;
     }
 
     private static DataGridTextColumn CreateTextColumn(string header, string propertyName, double starWidth)
@@ -217,24 +421,6 @@ public sealed class PipeInsulationWindow : Window
             Binding = new Binding(propertyName) { UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged },
             Width = new DataGridLength(starWidth, DataGridLengthUnitType.Star)
         };
-    }
-
-    private static Button CreateButton(string content, Brush background)
-    {
-        Button button = new Button
-        {
-            Content = content,
-            Padding = new Thickness(14, 6, 14, 6),
-            Margin = new Thickness(4, 0, 0, 0),
-            MinHeight = 30
-        };
-        if (background != null)
-        {
-            button.Background = background;
-            button.Foreground = Brushes.White;
-            button.BorderBrush = background;
-        }
-        return button;
     }
 
     private void ScopeRadioButtonChecked(object sender, RoutedEventArgs e)
@@ -250,18 +436,164 @@ public sealed class PipeInsulationWindow : Window
         }
     }
 
-    private void ApplyButtonClicked(object sender, RoutedEventArgs e)
+    private void SystemTypeComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        SelectedInsulationType = insulationTypeComboBox.SelectedItem as InsulationTypeItem;
-        if (SelectedInsulationType == null)
+        if (bySystemTypeRadioButton != null && bySystemTypeRadioButton.IsChecked == true)
         {
-            MessageBox.Show("Vui lòng chọn Insulation Type.", Title, MessageBoxButton.OK, MessageBoxImage.Information);
+            AutoSwitchPresetForSelectedSystem();
+        }
+    }
+
+    private void AutoSwitchPresetForSelectedSystem()
+    {
+        PipeInsulationSystemOption selectedSystem = systemTypeComboBox == null
+            ? null
+            : systemTypeComboBox.SelectedItem as PipeInsulationSystemOption;
+        if (selectedSystem == null || string.Equals(selectedSystem.SystemName, EmptySystemTypeMessage, StringComparison.OrdinalIgnoreCase))
+        {
             return;
         }
 
-        if (!Rules.Any(rule => rule != null && rule.MinDN > 0 && rule.MaxDN >= rule.MinDN && rule.ThicknessMM > 0))
+        string suggestedPresetKey = PipeInsulationRules.SuggestedPresetKey(selectedSystem.SystemName);
+        if (!string.IsNullOrWhiteSpace(suggestedPresetKey))
         {
-            MessageBox.Show("Vui lòng nhập ít nhất một rule hợp lệ.", Title, MessageBoxButton.OK, MessageBoxImage.Information);
+            SelectPreset(FindPreset(suggestedPresetKey), true);
+        }
+    }
+
+    private void PresetComboBoxSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (isLoadingPreset)
+        {
+            return;
+        }
+
+        PipeInsulationPresetItem selectedPreset = presetComboBox.SelectedItem as PipeInsulationPresetItem;
+        if (selectedPreset != null)
+        {
+            LoadPreset(selectedPreset, false);
+        }
+    }
+
+    private void SelectPreset(PipeInsulationPresetItem preset, bool wasAutoSelected)
+    {
+        if (preset == null)
+        {
+            return;
+        }
+
+        isLoadingPreset = true;
+        presetComboBox.SelectedItem = preset;
+        isLoadingPreset = false;
+        LoadPreset(preset, wasAutoSelected);
+    }
+
+    private void LoadPreset(PipeInsulationPresetItem preset, bool wasAutoSelected)
+    {
+        List<PipeInsulationRule> rules = preset.IsUserCustom && savedUserCustomRules.Count > 0
+            ? CloneRules(savedUserCustomRules)
+            : PipeInsulationRules.DefaultForPreset(preset.Key);
+        ReplaceRules(rules);
+
+        if (wasAutoSelected)
+        {
+            presetStatusText.Text = "Đã tự động chọn “" + preset.DisplayName + "” theo System Type trong view.";
+        }
+        else if (preset.IsUserCustom && savedUserCustomRules.Count == 0)
+        {
+            presetStatusText.Text = "Chưa có preset người dùng đã lưu. Bảng đang bắt đầu từ chuẩn Multi-System C1.";
+        }
+        else
+        {
+            presetStatusText.Text = "Đang dùng “" + preset.DisplayName + "”. Chỉnh sửa bảng và chọn Lưu Preset này để giữ lại làm User Custom.";
+        }
+    }
+
+    private void ReloadPresetButtonClicked(object sender, RoutedEventArgs e)
+    {
+        PipeInsulationPresetItem selectedPreset = presetComboBox.SelectedItem as PipeInsulationPresetItem;
+        if (selectedPreset == null)
+        {
+            return;
+        }
+
+        if (selectedPreset.IsUserCustom)
+        {
+            ReplaceRules(PipeInsulationRules.DefaultAllC1());
+            presetStatusText.Text = "Đã nạp lại chuẩn C1 Multi-System. Chọn Lưu Preset này nếu muốn thay User Custom.";
+            return;
+        }
+
+        ReplaceRules(PipeInsulationRules.DefaultForPreset(selectedPreset.Key));
+        presetStatusText.Text = "Đã nạp lại “" + selectedPreset.DisplayName + "” theo chuẩn C1.";
+    }
+
+    private void AddRowButtonClicked(object sender, RoutedEventArgs e)
+    {
+        CommitGridEdits();
+        PipeInsulationSystemOption selectedSystem = systemTypeComboBox.SelectedItem as PipeInsulationSystemOption;
+        string systemName = selectedSystem == null || string.Equals(selectedSystem.SystemName, EmptySystemTypeMessage, StringComparison.OrdinalIgnoreCase)
+            ? "OTHER"
+            : selectedSystem.SystemName;
+        PipeInsulationRule newRule = new PipeInsulationRule
+        {
+            System = systemName,
+            MinDN = 20,
+            MaxDN = 40,
+            ThicknessMM = 25
+        };
+        Rules.Add(newRule);
+        rulesGrid.SelectedItem = newRule;
+        rulesGrid.ScrollIntoView(newRule);
+        presetStatusText.Text = "Đã thêm một dòng mới. Nhập dải DN và độ dày phù hợp.";
+    }
+
+    private void DeleteRowButtonClicked(object sender, RoutedEventArgs e)
+    {
+        PipeInsulationRule selectedRule = rulesGrid.SelectedItem as PipeInsulationRule;
+        if (selectedRule == null)
+        {
+            presetStatusText.Text = "Chọn một dòng trong bảng trước khi xóa.";
+            return;
+        }
+
+        Rules.Remove(selectedRule);
+        presetStatusText.Text = "Đã xóa dòng quy tắc được chọn.";
+    }
+
+    private void SavePresetButtonClicked(object sender, RoutedEventArgs e)
+    {
+        List<PipeInsulationRule> validRules = GetValidRules();
+        if (validRules.Count == 0)
+        {
+            MessageBox.Show("Vui lòng nhập ít nhất một rule hợp lệ trước khi lưu.", Title, MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        string saveError;
+        if (!SaveUserCustomRules(validRules, out saveError))
+        {
+            MessageBox.Show("Không thể lưu preset người dùng.\n" + saveError, Title, MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        savedUserCustomRules = CloneRules(validRules);
+        SelectPreset(FindPreset(PipeInsulationRules.UserCustomPresetKey), false);
+        presetStatusText.Text = "Đã lưu vào %APPDATA%\\BIN_PipeInsulation\\presets.json dưới tên User Custom.";
+    }
+
+    private void ApplyButtonClicked(object sender, RoutedEventArgs e)
+    {
+        List<PipeInsulationRule> validRules = GetValidRules();
+        if (insulationTypeComboBox.SelectedItem == null)
+        {
+            MessageBox.Show("Vui lòng chọn Loại insulation.", Title, MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (validRules.Count == 0)
+        {
+            MessageBox.Show("Vui lòng nhập ít nhất một rule hợp lệ (DN bắt đầu, DN kết thúc và độ dày phải lớn hơn 0).", Title, MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -278,7 +610,8 @@ public sealed class PipeInsulationWindow : Window
             SelectedScope = PipeInsulationScope.BySystemType;
         }
 
-        SelectedSystemType = systemTypeComboBox.SelectedItem as string;
+        PipeInsulationSystemOption selectedSystem = systemTypeComboBox.SelectedItem as PipeInsulationSystemOption;
+        SelectedSystemType = selectedSystem == null ? null : selectedSystem.SystemName;
         if (SelectedScope == PipeInsulationScope.BySystemType &&
             (string.IsNullOrWhiteSpace(SelectedSystemType) ||
              string.Equals(SelectedSystemType, EmptySystemTypeMessage, StringComparison.OrdinalIgnoreCase)))
@@ -287,84 +620,146 @@ public sealed class PipeInsulationWindow : Window
             return;
         }
 
+        SelectedInsulationType = insulationTypeComboBox.SelectedItem as InsulationTypeItem;
         RemoveExisting = removeExistingCheckBox.IsChecked == true;
-        string saveError;
-        if (!SaveRules(out saveError))
-        {
-            MessageBox.Show("Không thể lưu rule insulation.\n" + saveError, Title, MessageBoxButton.OK, MessageBoxImage.Error);
-            return;
-        }
+        SelectedPresetName = (presetComboBox.SelectedItem as PipeInsulationPresetItem)?.DisplayName ?? "Tùy chỉnh";
 
+        ReplaceRules(validRules);
         DialogResult = true;
         Close();
     }
 
-    private static IEnumerable<PipeInsulationRule> LoadRules()
+    private List<PipeInsulationRule> GetValidRules()
+    {
+        CommitGridEdits();
+        return Rules.Where(IsValidRule).Select(CloneRule).ToList();
+    }
+
+    private void CommitGridEdits()
+    {
+        rulesGrid.CommitEdit(DataGridEditingUnit.Cell, true);
+        rulesGrid.CommitEdit(DataGridEditingUnit.Row, true);
+    }
+
+    private void ReplaceRules(IEnumerable<PipeInsulationRule> rules)
+    {
+        Rules.Clear();
+        foreach (PipeInsulationRule rule in rules ?? Enumerable.Empty<PipeInsulationRule>())
+        {
+            Rules.Add(CloneRule(rule));
+        }
+    }
+
+    private PipeInsulationPresetItem FindPreset(string key)
+    {
+        return presetItems.FirstOrDefault(item => string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsValidRule(PipeInsulationRule rule)
+    {
+        return rule != null && !string.IsNullOrWhiteSpace(rule.System) && rule.MinDN > 0 &&
+               rule.MaxDN >= rule.MinDN && rule.ThicknessMM > 0;
+    }
+
+    private static PipeInsulationRule CloneRule(PipeInsulationRule rule)
+    {
+        return new PipeInsulationRule
+        {
+            System = rule == null ? "OTHER" : rule.System,
+            MinDN = rule == null ? 0 : rule.MinDN,
+            MaxDN = rule == null ? 0 : rule.MaxDN,
+            ThicknessMM = rule == null ? 0 : rule.ThicknessMM
+        };
+    }
+
+    private static List<PipeInsulationRule> CloneRules(IEnumerable<PipeInsulationRule> rules)
+    {
+        return (rules ?? Enumerable.Empty<PipeInsulationRule>()).Select(CloneRule).ToList();
+    }
+
+    private static List<PipeInsulationRule> LoadUserCustomRules()
+    {
+        List<PipeInsulationRule> rules = LoadRulesFromFile(PresetFileName);
+        if (rules.Count > 0)
+        {
+            return rules;
+        }
+
+        // Legacy system_rules.json becomes the initial User Custom preset until saved.
+        return LoadRulesFromFile(LegacyRulesFileName);
+    }
+
+    private static List<PipeInsulationRule> LoadRulesFromFile(string fileName)
     {
         try
         {
-            if (File.Exists(FileName))
+            if (!File.Exists(fileName))
             {
-                string json = File.ReadAllText(FileName);
-                List<PipeInsulationRule> rules = new List<PipeInsulationRule>();
-                foreach (Match match in Regex.Matches(json,
-                    "\\{\\s*\\\"System\\\"\\s*:\\s*\\\"(?<system>(?:\\\\.|[^\\\"])*)\\\"\\s*,\\s*\\\"MinDN\\\"\\s*:\\s*(?<min>-?[0-9.]+)\\s*,\\s*\\\"MaxDN\\\"\\s*:\\s*(?<max>-?[0-9.]+)\\s*,\\s*\\\"ThicknessMM\\\"\\s*:\\s*(?<thickness>-?[0-9.]+)",
-                    RegexOptions.CultureInvariant))
+                return new List<PipeInsulationRule>();
+            }
+
+            string json = File.ReadAllText(fileName);
+            List<PipeInsulationRule> rules = new List<PipeInsulationRule>();
+            foreach (Match match in Regex.Matches(json,
+                "\\{\\s*\\\"System\\\"\\s*:\\s*\\\"(?<system>(?:\\\\.|[^\\\"])*)\\\"\\s*,\\s*\\\"MinDN\\\"\\s*:\\s*(?<min>-?[0-9.]+)\\s*,\\s*\\\"MaxDN\\\"\\s*:\\s*(?<max>-?[0-9.]+)\\s*,\\s*\\\"ThicknessMM\\\"\\s*:\\s*(?<thickness>-?[0-9.]+)",
+                RegexOptions.CultureInvariant))
+            {
+                double min;
+                double max;
+                double thickness;
+                if (double.TryParse(match.Groups["min"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out min) &&
+                    double.TryParse(match.Groups["max"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out max) &&
+                    double.TryParse(match.Groups["thickness"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out thickness))
                 {
-                    double min;
-                    double max;
-                    double thickness;
-                    if (double.TryParse(match.Groups["min"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out min) &&
-                        double.TryParse(match.Groups["max"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out max) &&
-                        double.TryParse(match.Groups["thickness"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out thickness))
+                    PipeInsulationRule rule = new PipeInsulationRule
                     {
-                        rules.Add(new PipeInsulationRule
-                        {
-                            System = JsonUnescape(match.Groups["system"].Value),
-                            MinDN = min,
-                            MaxDN = max,
-                            ThicknessMM = thickness
-                        });
+                        System = JsonUnescape(match.Groups["system"].Value),
+                        MinDN = min,
+                        MaxDN = max,
+                        ThicknessMM = thickness
+                    };
+                    if (IsValidRule(rule))
+                    {
+                        rules.Add(rule);
                     }
                 }
-                if (rules.Count > 0)
-                {
-                    return rules;
-                }
             }
+            return rules;
         }
         catch
         {
             // A malformed local settings file must not prevent the command from opening.
+            return new List<PipeInsulationRule>();
         }
-
-        return PipeInsulationRules.DefaultC1();
     }
 
-    private bool SaveRules(out string error)
+    private static bool SaveUserCustomRules(IEnumerable<PipeInsulationRule> rules, out string error)
     {
         try
         {
-            List<PipeInsulationRule> rows = Rules
-                .Where(rule => rule != null && rule.MinDN > 0 && rule.MaxDN >= rule.MinDN && rule.ThicknessMM > 0)
-                .ToList();
-            Directory.CreateDirectory(Path.GetDirectoryName(FileName));
-            List<string> lines = new List<string> { "[" };
+            List<PipeInsulationRule> rows = rules.Where(IsValidRule).ToList();
+            Directory.CreateDirectory(SettingsDirectory);
+            StringBuilder json = new StringBuilder();
+            json.AppendLine("{");
+            json.AppendLine("  \"schemaVersion\": 1,");
+            json.AppendLine("  \"userCustom\": [");
             for (int index = 0; index < rows.Count; index++)
             {
                 PipeInsulationRule rule = rows[index];
                 string comma = index == rows.Count - 1 ? string.Empty : ",";
-                lines.Add(string.Format(
+                json.AppendFormat(
                     CultureInfo.InvariantCulture,
-                    "  {{\"System\":\"{0}\",\"MinDN\":{1},\"MaxDN\":{2},\"ThicknessMM\":{3}}}{4}",
-                    JsonEscape(rule.System ?? "OTHER"),
+                    "    {{\"System\":\"{0}\",\"MinDN\":{1},\"MaxDN\":{2},\"ThicknessMM\":{3}}}{4}{5}",
+                    JsonEscape(rule.System),
                     rule.MinDN,
                     rule.MaxDN,
                     rule.ThicknessMM,
-                    comma));
+                    comma,
+                    Environment.NewLine);
             }
-            lines.Add("]");
-            File.WriteAllLines(FileName, lines);
+            json.AppendLine("  ]");
+            json.AppendLine("}");
+            File.WriteAllText(PresetFileName, json.ToString(), new UTF8Encoding(false));
             error = null;
             return true;
         }
@@ -377,11 +772,19 @@ public sealed class PipeInsulationWindow : Window
 
     private static string JsonEscape(string value)
     {
-        return (value ?? string.Empty).Replace("\\", "\\\\").Replace("\"", "\\\"");
+        return (value ?? string.Empty)
+            .Replace("\\", "\\\\")
+            .Replace("\"", "\\\"")
+            .Replace("\r", "\\r")
+            .Replace("\n", "\\n");
     }
 
     private static string JsonUnescape(string value)
     {
-        return (value ?? string.Empty).Replace("\\\"", "\"").Replace("\\\\", "\\");
+        return (value ?? string.Empty)
+            .Replace("\\n", "\n")
+            .Replace("\\r", "\r")
+            .Replace("\\\"", "\"")
+            .Replace("\\\\", "\\");
     }
 }
