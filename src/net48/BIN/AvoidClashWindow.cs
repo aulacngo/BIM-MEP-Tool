@@ -29,7 +29,7 @@ public class AvoidClashWindow : Window
 	private RevitTransform _obstacleTransform;
 
 	private double _angleDegree = 45.0;
-	private BypassDirection _direction = BypassDirection.Up;
+	private BypassDirection _direction = BypassDirection.Down;
 	private double _clearanceMm = 50.0;
 
 	private System.Windows.Controls.TextBox _txtClearance;
@@ -40,6 +40,7 @@ public class AvoidClashWindow : Window
 	private Button _btnRight;
 	private Button _btn45;
 	private Button _btn90;
+	private Canvas _canvas;
 
 	public AvoidClashWindow(UIDocument uidoc, Element runningPipeElem, Element obstacleElem, RevitTransform obstacleTransform = null)
 	{
@@ -117,9 +118,9 @@ public class AvoidClashWindow : Window
 			BorderBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(226, 232, 240)),
 			BorderThickness = new Thickness(1)
 		};
-		Canvas canvas = new Canvas { ClipToBounds = true };
-		DrawDiagram(canvas);
-		diagramBorder.Child = canvas;
+		_canvas = new Canvas { ClipToBounds = true };
+		UpdateDiagram();
+		diagramBorder.Child = _canvas;
 		System.Windows.Controls.Grid.SetRow(diagramBorder, 1);
 		root.Children.Add(diagramBorder);
 
@@ -172,12 +173,12 @@ public class AvoidClashWindow : Window
 		dirGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
 		dirGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-		_btnUp = CreateToggleButton("Up (Len)", true);
+		_btnUp = CreateToggleButton("Up (Len)", false);
 		_btnUp.Click += (s, e) => SelectDirection(BypassDirection.Up);
 		System.Windows.Controls.Grid.SetColumn(_btnUp, 0);
 		dirGrid.Children.Add(_btnUp);
 
-		_btnDown = CreateToggleButton("Down (Xuong)", false);
+		_btnDown = CreateToggleButton("Down (Xuong)", true);
 		_btnDown.Click += (s, e) => SelectDirection(BypassDirection.Down);
 		System.Windows.Controls.Grid.SetColumn(_btnDown, 2);
 		dirGrid.Children.Add(_btnDown);
@@ -276,61 +277,146 @@ public class AvoidClashWindow : Window
 		Content = root;
 	}
 
-	private void DrawDiagram(Canvas canvas)
+	private void UpdateDiagram()
 	{
-		// Draw 45 deg bridge over obstacle
-		System.Windows.Shapes.Ellipse obs = new System.Windows.Shapes.Ellipse
+		if (_canvas == null) return;
+		_canvas.Children.Clear();
+
+		SolidColorBrush obstacleBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(220, 38, 38));
+		SolidColorBrush pipeBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(37, 99, 235));
+		SolidColorBrush lateralBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(124, 58, 237));
+		const double centerY = 72.0;
+		const double obstacleX = 174.0;
+		const double obstacleY = 54.0;
+
+		AddDiagramBadge(GetDiagramBadgeText());
+		System.Windows.Shapes.Rectangle obstacle = new System.Windows.Shapes.Rectangle
 		{
-			Width = 36,
+			Width = 72,
 			Height = 36,
-			Fill = new SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68)),
-			Stroke = new SolidColorBrush(System.Windows.Media.Color.FromRgb(185, 28, 28)),
-			StrokeThickness = 2
+			Fill = new SolidColorBrush(System.Windows.Media.Color.FromRgb(254, 226, 226)),
+			Stroke = obstacleBrush,
+			StrokeThickness = 2,
+			RadiusX = 3,
+			RadiusY = 3
 		};
-		Canvas.SetLeft(obs, 180);
-		Canvas.SetTop(obs, 65);
-		canvas.Children.Add(obs);
+		Canvas.SetLeft(obstacle, obstacleX);
+		Canvas.SetTop(obstacle, obstacleY);
+		_canvas.Children.Add(obstacle);
 
-		// Running pipe path
-		PathGeometry geom = new PathGeometry();
-		PathFigure fig = new PathFigure { StartPoint = new System.Windows.Point(20, 83) };
-		fig.Segments.Add(new System.Windows.Media.LineSegment(new System.Windows.Point(120, 83), true));
-		fig.Segments.Add(new System.Windows.Media.LineSegment(new System.Windows.Point(165, 35), true));
-		fig.Segments.Add(new System.Windows.Media.LineSegment(new System.Windows.Point(230, 35), true));
-		fig.Segments.Add(new System.Windows.Media.LineSegment(new System.Windows.Point(275, 83), true));
-		fig.Segments.Add(new System.Windows.Media.LineSegment(new System.Windows.Point(380, 83), true));
-		geom.Figures.Add(fig);
+		bool verticalBypass = _direction == BypassDirection.Down || _direction == BypassDirection.Up;
+		bool lowerOffset = _direction == BypassDirection.Down || _direction == BypassDirection.Left;
+		double bypassY = lowerOffset ? 112.0 : 32.0;
+		SolidColorBrush pathBrush = verticalBypass ? pipeBrush : lateralBrush;
+		DrawPipePath(BuildDiagramPath(centerY, bypassY, _angleDegree == 90.0), pathBrush);
 
-		System.Windows.Shapes.Path path = new System.Windows.Shapes.Path
+		if (verticalBypass)
 		{
-			Data = geom,
-			Stroke = new SolidColorBrush(System.Windows.Media.Color.FromRgb(37, 99, 235)),
-			StrokeThickness = 4
+			AddDiagramText("ONG CHINH", 22, centerY + 7, pipeBrush);
+		}
+		else
+		{
+			AddDiagramText(_direction == BypassDirection.Left
+				? "<- NE TRAI (mat bang)"
+				: "NE PHAI (mat bang) ->",
+				126, lowerOffset ? 116 : 14, lateralBrush);
+		}
+		AddDiagramText("VAT CAN / DAM", obstacleX + 4, obstacleY + 11, obstacleBrush);
+	}
+
+	private List<System.Windows.Point> BuildDiagramPath(double centerY, double bypassY, bool squareBypass)
+	{
+		if (squareBypass)
+		{
+			return new List<System.Windows.Point>
+			{
+				new System.Windows.Point(18, centerY), new System.Windows.Point(140, centerY),
+				new System.Windows.Point(140, bypassY), new System.Windows.Point(280, bypassY),
+				new System.Windows.Point(280, centerY), new System.Windows.Point(402, centerY)
+			};
+		}
+		return new List<System.Windows.Point>
+		{
+			new System.Windows.Point(18, centerY), new System.Windows.Point(120, centerY),
+			new System.Windows.Point(160, bypassY), new System.Windows.Point(260, bypassY),
+			new System.Windows.Point(300, centerY), new System.Windows.Point(402, centerY)
 		};
-		canvas.Children.Add(path);
+	}
 
-		// Text labels
-		TextBlock lblPipe = new TextBlock
+	private string GetDiagramBadgeText()
+	{
+		if (_direction == BypassDirection.Down)
 		{
-			Text = "ONG CHINH",
-			FontSize = 10,
+			return _angleDegree == 90.0
+				? "Dung 90 deg: U-Bypass Vuong Goc (Ne sat dam)"
+				: "Dung 45 deg: Xien Vat Chuan Thuy Luc";
+		}
+		if (_direction == BypassDirection.Up)
+		{
+			return _angleDegree == 90.0
+				? "Dung 90 deg: U-Bypass Vuong Goc (Ne len)"
+				: "Dung 45 deg: Xien Vat Chuan Thuy Luc (Ne len)";
+		}
+		return _direction == BypassDirection.Left
+			? "Ne Trai: Offset ngang theo mat bang"
+			: "Ne Phai: Offset ngang theo mat bang";
+	}
+
+	private void AddDiagramBadge(string text)
+	{
+		Border badge = new Border
+		{
+			Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(219, 234, 254)),
+			BorderBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(147, 197, 253)),
+			BorderThickness = new Thickness(1),
+			CornerRadius = new CornerRadius(4),
+			Padding = new Thickness(6, 2, 6, 2),
+			Child = new TextBlock
+			{
+				Text = text,
+				FontSize = 10,
+				FontWeight = FontWeights.SemiBold,
+				Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(30, 64, 175))
+			}
+		};
+		Canvas.SetLeft(badge, 10);
+		Canvas.SetTop(badge, 7);
+		_canvas.Children.Add(badge);
+	}
+
+	private void DrawPipePath(IList<System.Windows.Point> points, SolidColorBrush brush)
+	{
+		if (points == null || points.Count < 2) return;
+		PathFigure figure = new PathFigure { StartPoint = points[0] };
+		for (int i = 1; i < points.Count; i++)
+		{
+			figure.Segments.Add(new System.Windows.Media.LineSegment(points[i], true));
+		}
+		PathGeometry geometry = new PathGeometry();
+		geometry.Figures.Add(figure);
+		_canvas.Children.Add(new System.Windows.Shapes.Path
+		{
+			Data = geometry,
+			Stroke = brush,
+			StrokeThickness = 4,
+			StrokeLineJoin = PenLineJoin.Round,
+			StrokeStartLineCap = PenLineCap.Round,
+			StrokeEndLineCap = PenLineCap.Round
+		});
+	}
+
+	private void AddDiagramText(string text, double left, double top, SolidColorBrush brush)
+	{
+		TextBlock label = new TextBlock
+		{
+			Text = text,
+			FontSize = 9,
 			FontWeight = FontWeights.Bold,
-			Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(37, 99, 235))
+			Foreground = brush
 		};
-		Canvas.SetLeft(lblPipe, 30);
-		Canvas.SetTop(lblPipe, 90);
-		canvas.Children.Add(lblPipe);
-
-		TextBlock lblObs = new TextBlock
-		{
-			Text = "VAT CAN",
-			FontSize = 10,
-			FontWeight = FontWeights.Bold,
-			Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(239, 68, 68))
-		};
-		Canvas.SetLeft(lblObs, 175);
-		Canvas.SetTop(lblObs, 105);
-		canvas.Children.Add(lblObs);
+		Canvas.SetLeft(label, left);
+		Canvas.SetTop(label, top);
+		_canvas.Children.Add(label);
 	}
 
 	private Button CreateToggleButton(string text, bool isSelected)
@@ -369,6 +455,7 @@ public class AvoidClashWindow : Window
 		_angleDegree = angle;
 		UpdateToggleStyle(_btn45, angle == 45.0);
 		UpdateToggleStyle(_btn90, angle == 90.0);
+		UpdateDiagram();
 	}
 
 	private void SelectDirection(BypassDirection dir)
@@ -378,6 +465,7 @@ public class AvoidClashWindow : Window
 		UpdateToggleStyle(_btnDown, dir == BypassDirection.Down);
 		UpdateToggleStyle(_btnLeft, dir == BypassDirection.Left);
 		UpdateToggleStyle(_btnRight, dir == BypassDirection.Right);
+		UpdateDiagram();
 	}
 
 	private void AvoidClashWindow_PreviewKeyDown(object sender, KeyEventArgs e)

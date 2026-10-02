@@ -180,21 +180,26 @@ public class AvoidClashCmd : IExternalCommand
 			vOffset = obstacleWidth * 0.5 + pipeRadius + clearanceFeet;
 		}
 
-		double slopeRun = angleDeg == 45.0
-			? vOffset
-			: Math.Max(pipeRadius * 2.0, 60.0 / 304.8);
+		// A 90-degree bypass is a square U: no diagonal run is consumed before or after the obstacle.
+		double slopeRun = angleDeg == 45.0 ? vOffset : 0.0;
+		XYZ c1 = angleDeg == 45.0 ? pClearEntry - pipeDir * slopeRun : pClearEntry;
 		XYZ c2 = pClearEntry + uDir * vOffset;
 		XYZ c3 = pClearExit + uDir * vOffset;
-		XYZ c1 = pClearEntry - pipeDir * slopeRun;
-		XYZ c4 = pClearExit + pipeDir * slopeRun;
+		XYZ c4 = angleDeg == 45.0 ? pClearExit + pipeDir * slopeRun : pClearExit;
 
-		double tC1 = (c1 - pStart).DotProduct(pipeDir);
-		double tC4 = (c4 - pStart).DotProduct(pipeDir);
-		if (tC1 <= 0.05 || tC4 >= pipeLength - 0.05)
+		if ((c1 - pStart).DotProduct(pipeDir) <= 0.05
+			|| (pEnd - c4).DotProduct(pipeDir) <= 0.05)
 		{
-			error = "Doan ong qua ngan (can toi thieu "
-				+ Math.Round((c4 - c1).GetLength() * 304.8)
-				+ " mm de ne dam). Vui long chon vi tri hoac khoang ho nho hon.";
+			if (angleDeg == 45.0)
+			{
+				double neededMm = Math.Ceiling(((c4 - c1).DotProduct(pipeDir) + 0.10) * 304.8);
+				error = "Doan ong khong du dai de uon 45 deg (can toi thieu " + neededMm
+					+ " mm). Vui long chon goc '90 deg (Vuong Goc)' de no sat dam!";
+			}
+			else
+			{
+				error = "Doan ong khong du dai de tao bypass 90 deg tai vi tri dam nay.";
+			}
 			return false;
 		}
 

@@ -103,7 +103,19 @@ Write-Host "`n[4/4] Creating ZIP: $zipFile..." -ForegroundColor Yellow
 if (Test-Path $zipFile) {
     Remove-Item -LiteralPath $zipFile -Force
 }
-Compress-Archive -Path "$portableFolder\*" -DestinationPath $zipFile -CompressionLevel Optimal
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$retryCount = 0
+while ($true) {
+    try {
+        [System.IO.Compression.ZipFile]::CreateFromDirectory($portableFolder, $zipFile, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+        break
+    }
+    catch {
+        $retryCount++
+        if ($retryCount -gt 5) { throw $_ }
+        Start-Sleep -Milliseconds 600
+    }
+}
 
 $zipItem = Get-Item $zipFile
 $sizeMb = [Math]::Round($zipItem.Length / 1MB, 2)
