@@ -51,3 +51,7 @@ __pycache__/
 # CAD samples and temp DXFs
 cad_samples/
 *.dxf
+
+# Cloudflare Wrangler state
+.wrangler/
+
