@@ -93,7 +93,7 @@ public class PipeInsulationCmd : IExternalCommand
         }
 
         List<PipeInsulationRule> systemRules = ui.Rules
-            .Where(rule => rule != null && rule.MinDN > 0 && rule.MaxDN >= rule.MinDN && rule.ThicknessMM > 0)
+            .Where(rule => rule != null && rule.MinDN >= 0 && rule.MaxDN >= rule.MinDN && rule.ThicknessMM > 0)
             .ToList();
         int insulatedCount = 0;
         int skippedCount = 0;
@@ -118,11 +118,6 @@ public class PipeInsulationCmd : IExternalCommand
                     removedCount += RemoveExistingPipeInsulation(doc, new List<Element>(), teeFittings);
                 }
 
-                if (ui.RemoveExisting)
-                {
-                    removedCount += RemoveExistingPipeInsulation(doc, pipeElements, fittingElements);
-                }
-
                 if (removedCount > 0)
                 {
                     doc.Regenerate();
@@ -131,19 +126,29 @@ public class PipeInsulationCmd : IExternalCommand
                 foreach (Element element in pipeElements)
                 {
                     Pipe pipe = element as Pipe;
-                    double thicknessMm = pipe == null ? 0.0 : PipeInsulationRules.GetThicknessMm(pipe, systemRules);
-                    if (thicknessMm <= 0.0)
+                    PipeInsulationRule matchingRule = pipe == null
+                        ? null
+                        : PipeInsulationRules.FindMatchingPipeRule(pipe, systemRules);
+                    if (matchingRule == null)
                     {
                         skippedCount++;
                         continue;
                     }
 
-                    try
+                    ElementId typeId = ResolveInsulationType(doc, matchingRule.InsulationTypeName, false) ?? insulationTypeId;
+                    int removedForHost;
+                    if (TryReplacePipeInsulation(
+                        doc,
+                        element,
+                        typeId,
+                        matchingRule.ThicknessMM,
+                        ui.RemoveExisting,
+                        out removedForHost))
                     {
-                        PipeInsulation.Create(doc, element.Id, insulationTypeId, thicknessMm / 304.8);
                         insulatedCount++;
+                        removedCount += removedForHost;
                     }
-                    catch
+                    else
                     {
                         skippedCount++;
                     }
@@ -152,19 +157,27 @@ public class PipeInsulationCmd : IExternalCommand
                 foreach (Element fitting in fittingElements)
                 {
                     double fittingSize = GetPipeFittingSize(fitting);
-                    double thicknessMm = PipeInsulationRules.GetFittingThicknessMm(fitting, fittingSize, systemRules);
-                    if (thicknessMm <= 0.0)
+                    PipeInsulationRule matchingRule = PipeInsulationRules.FindMatchingPipeFittingRule(fitting, fittingSize, systemRules);
+                    if (matchingRule == null)
                     {
                         skippedCount++;
                         continue;
                     }
 
-                    try
+                    ElementId typeId = ResolveInsulationType(doc, matchingRule.InsulationTypeName, false) ?? insulationTypeId;
+                    int removedForHost;
+                    if (TryReplacePipeInsulation(
+                        doc,
+                        fitting,
+                        typeId,
+                        matchingRule.ThicknessMM,
+                        ui.RemoveExisting,
+                        out removedForHost))
                     {
-                        PipeInsulation.Create(doc, fitting.Id, insulationTypeId, thicknessMm / 304.8);
                         insulatedCount++;
+                        removedCount += removedForHost;
                     }
-                    catch
+                    else
                     {
                         skippedCount++;
                     }
@@ -232,11 +245,6 @@ public class PipeInsulationCmd : IExternalCommand
                     removedCount += RemoveExistingDuctInsulation(doc, new List<Element>(), teeFittings);
                 }
 
-                if (ui.RemoveExisting)
-                {
-                    removedCount += RemoveExistingDuctInsulation(doc, ductElements, fittingElements);
-                }
-
                 if (removedCount > 0)
                 {
                     doc.Regenerate();
@@ -246,21 +254,29 @@ public class PipeInsulationCmd : IExternalCommand
                 {
                     Duct duct = element as Duct;
                     double ductSize = GetDuctSize(duct);
-                    double thicknessMm = duct == null
-                        ? 0.0
-                        : PipeInsulationRules.GetDuctThicknessMm(duct, ductSize, systemRules);
-                    if (thicknessMm <= 0.0)
+                    PipeInsulationRule matchingRule = duct == null
+                        ? null
+                        : PipeInsulationRules.FindMatchingDuctRule(duct, ductSize, systemRules);
+                    if (matchingRule == null)
                     {
                         skippedCount++;
                         continue;
                     }
 
-                    try
+                    ElementId typeId = ResolveInsulationType(doc, matchingRule.InsulationTypeName, true) ?? insulationTypeId;
+                    int removedForHost;
+                    if (TryReplaceDuctInsulation(
+                        doc,
+                        element,
+                        typeId,
+                        matchingRule.ThicknessMM,
+                        ui.RemoveExisting,
+                        out removedForHost))
                     {
-                        DuctInsulation.Create(doc, element.Id, insulationTypeId, thicknessMm / 304.8);
                         insulatedCount++;
+                        removedCount += removedForHost;
                     }
-                    catch
+                    else
                     {
                         skippedCount++;
                     }
@@ -269,19 +285,27 @@ public class PipeInsulationCmd : IExternalCommand
                 foreach (Element fitting in fittingElements)
                 {
                     double fittingSize = GetDuctFittingSize(fitting);
-                    double thicknessMm = PipeInsulationRules.GetDuctFittingThicknessMm(fitting, fittingSize, systemRules);
-                    if (thicknessMm <= 0.0)
+                    PipeInsulationRule matchingRule = PipeInsulationRules.FindMatchingDuctFittingRule(fitting, fittingSize, systemRules);
+                    if (matchingRule == null)
                     {
                         skippedCount++;
                         continue;
                     }
 
-                    try
+                    ElementId typeId = ResolveInsulationType(doc, matchingRule.InsulationTypeName, true) ?? insulationTypeId;
+                    int removedForHost;
+                    if (TryReplaceDuctInsulation(
+                        doc,
+                        fitting,
+                        typeId,
+                        matchingRule.ThicknessMM,
+                        ui.RemoveExisting,
+                        out removedForHost))
                     {
-                        DuctInsulation.Create(doc, fitting.Id, insulationTypeId, thicknessMm / 304.8);
                         insulatedCount++;
+                        removedCount += removedForHost;
                     }
-                    catch
+                    else
                     {
                         skippedCount++;
                     }
@@ -302,6 +326,124 @@ public class PipeInsulationCmd : IExternalCommand
 
         ShowCompletionDialog(ui, "ống gió", ductElements.Count, fittingElements.Count, insulatedCount, skippedCount, removedCount);
         return Result.Succeeded;
+    }
+
+    private static ElementId ResolveInsulationType(Document doc, string typeName, bool isDuct)
+    {
+        if (!IsSpecificInsulationTypeName(typeName))
+        {
+            return null;
+        }
+
+        IEnumerable<InsulationTypeItem> insulationTypes = isDuct
+            ? GetDuctInsulationTypes(doc)
+            : GetPipeInsulationTypes(doc);
+        InsulationTypeItem matchingType = insulationTypes.FirstOrDefault(item =>
+            string.Equals(item.Name, typeName, StringComparison.OrdinalIgnoreCase));
+        return matchingType == null ? null : matchingType.Tag as ElementId;
+    }
+
+    private static bool IsSpecificInsulationTypeName(string typeName)
+    {
+        return !string.IsNullOrWhiteSpace(typeName) &&
+               !string.Equals(typeName, "(Theo loại chính)", StringComparison.OrdinalIgnoreCase) &&
+               !string.Equals(typeName, "(Mặc định)", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryReplacePipeInsulation(
+        Document doc,
+        Element element,
+        ElementId insulationTypeId,
+        double thicknessMm,
+        bool removeExisting,
+        out int removedCount)
+    {
+        removedCount = 0;
+        using (SubTransaction sub = new SubTransaction(doc))
+        {
+            try
+            {
+                sub.Start();
+                if (removeExisting)
+                {
+                    ICollection<ElementId> oldInsulationIds = InsulationLiningBase.GetInsulationIds(doc, element.Id);
+                    if (oldInsulationIds != null && oldInsulationIds.Count > 0)
+                    {
+                        doc.Delete(oldInsulationIds);
+                        removedCount = oldInsulationIds.Count;
+                    }
+                }
+
+                PipeInsulation.Create(doc, element.Id, insulationTypeId, thicknessMm / 304.8);
+                sub.Commit();
+                return true;
+            }
+            catch
+            {
+                try
+                {
+                    if (sub.GetStatus() == TransactionStatus.Started)
+                    {
+                        sub.RollBack();
+                    }
+                }
+                catch
+                {
+                    // Preserve the original per-host failure as a skipped element.
+                }
+
+                removedCount = 0;
+                return false;
+            }
+        }
+    }
+
+    private static bool TryReplaceDuctInsulation(
+        Document doc,
+        Element element,
+        ElementId insulationTypeId,
+        double thicknessMm,
+        bool removeExisting,
+        out int removedCount)
+    {
+        removedCount = 0;
+        using (SubTransaction sub = new SubTransaction(doc))
+        {
+            try
+            {
+                sub.Start();
+                if (removeExisting)
+                {
+                    ICollection<ElementId> oldInsulationIds = InsulationLiningBase.GetInsulationIds(doc, element.Id);
+                    if (oldInsulationIds != null && oldInsulationIds.Count > 0)
+                    {
+                        doc.Delete(oldInsulationIds);
+                        removedCount = oldInsulationIds.Count;
+                    }
+                }
+
+                DuctInsulation.Create(doc, element.Id, insulationTypeId, thicknessMm / 304.8);
+                sub.Commit();
+                return true;
+            }
+            catch
+            {
+                try
+                {
+                    if (sub.GetStatus() == TransactionStatus.Started)
+                    {
+                        sub.RollBack();
+                    }
+                }
+                catch
+                {
+                    // Preserve the original per-host failure as a skipped element.
+                }
+
+                removedCount = 0;
+                return false;
+            }
+        }
     }
 
     private static List<PipeInsulationSystemOption> GetPipeSystemOptionsInActiveView(Document doc)

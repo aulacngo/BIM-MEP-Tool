@@ -49,6 +49,7 @@ internal sealed class PipeInsulationPresetItem
 public sealed class PipeInsulationWindow : Window
 {
     private const string EmptySystemTypeMessage = "Không có hệ thống nào trong view";
+    private const string RuleInsulationTypeDefault = "(Theo loại chính)";
     private static readonly string SettingsDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "BIN_PipeInsulation");
@@ -70,6 +71,7 @@ public sealed class PipeInsulationWindow : Window
     private readonly TextBlock presetStatusText;
     private DataGridTextColumn minSizeColumn;
     private DataGridTextColumn maxSizeColumn;
+    private DataGridComboBoxColumn insulationTypeColumn;
     private List<PipeInsulationPresetItem> presetItems;
     private readonly List<InsulationTypeItem> pipeInsulationTypes;
     private readonly List<InsulationTypeItem> ductInsulationTypes;
@@ -469,7 +471,29 @@ public sealed class PipeInsulationWindow : Window
         grid.Columns.Add(CreateTextColumn("Từ DN (mm)", "MinDN", 1));
         grid.Columns.Add(CreateTextColumn("Đến DN (mm)", "MaxDN", 1));
         grid.Columns.Add(CreateTextColumn("Độ dày (mm)", "ThicknessMM", 1));
+        insulationTypeColumn = new DataGridComboBoxColumn
+        {
+            Header = "Loại Insulation",
+            ItemsSource = GetRuleInsulationTypeOptions(MepTargetKind.Pipe),
+            SelectedItemBinding = new Binding("InsulationTypeName") { UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged },
+            Width = new DataGridLength(1.7, DataGridLengthUnitType.Star)
+        };
+        grid.Columns.Add(insulationTypeColumn);
         return grid;
+    }
+
+    private List<string> GetRuleInsulationTypeOptions(MepTargetKind targetKind)
+    {
+        IEnumerable<InsulationTypeItem> types = targetKind == MepTargetKind.Duct
+            ? ductInsulationTypes
+            : pipeInsulationTypes;
+        List<string> options = new List<string> { RuleInsulationTypeDefault };
+        options.AddRange(types
+            .Where(type => type != null && !string.IsNullOrWhiteSpace(type.Name))
+            .Select(type => type.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase));
+        return options;
     }
 
     private static DataGridTextColumn CreateTextColumn(string header, string propertyName, double starWidth)
@@ -496,10 +520,19 @@ public sealed class PipeInsulationWindow : Window
         isLoadingPreset = true;
         insulationTypeComboBox.ItemsSource = isDuct ? ductInsulationTypes : pipeInsulationTypes;
         insulationTypeComboBox.SelectedIndex = insulationTypeComboBox.Items.Count > 0 ? 0 : -1;
+        if (insulationTypeColumn != null)
+        {
+            insulationTypeColumn.ItemsSource = GetRuleInsulationTypeOptions(targetKind);
+        }
         presetItems = CreatePresetItems(targetKind);
         presetComboBox.ItemsSource = null;
         presetComboBox.ItemsSource = presetItems;
         isLoadingPreset = false;
+
+        if (isDuct)
+        {
+            smoothTeesCheckBox.IsChecked = false;
+        }
 
         selectedPipesRadioButton.Content = isDuct
             ? "Ống gió đang chọn (hoặc chọn trực tiếp nếu chưa chọn)"
@@ -683,7 +716,8 @@ public sealed class PipeInsulationWindow : Window
             System = systemName,
             MinDN = 20,
             MaxDN = 40,
-            ThicknessMM = 25
+            ThicknessMM = 25,
+            InsulationTypeName = RuleInsulationTypeDefault
         };
         Rules.Add(newRule);
         rulesGrid.SelectedItem = newRule;
@@ -801,6 +835,52 @@ public sealed class PipeInsulationWindow : Window
         {
             Rules.Add(CloneRule(rule));
         }
+        ApplySmartInsulationTypeMatches();
+    }
+
+    private void ApplySmartInsulationTypeMatches()
+    {
+        IEnumerable<InsulationTypeItem> availableTypes = SelectedMepTarget == MepTargetKind.Duct
+            ? ductInsulationTypes
+            : pipeInsulationTypes;
+        List<InsulationTypeItem> types = availableTypes
+            .Where(type => type != null && !string.IsNullOrWhiteSpace(type.Name))
+            .ToList();
+
+        foreach (PipeInsulationRule rule in Rules)
+        {
+            if (rule == null || !IsDefaultInsulationTypeName(rule.InsulationTypeName))
+            {
+                continue;
+            }
+
+            InsulationTypeItem matchingType = types.FirstOrDefault(type =>
+                PipeInsulationRules.Matches(type.Name, rule.System) &&
+                InsulationTypeContainsThickness(type.Name, rule.ThicknessMM));
+            rule.InsulationTypeName = matchingType == null ? RuleInsulationTypeDefault : matchingType.Name;
+        }
+    }
+
+    private static bool IsDefaultInsulationTypeName(string typeName)
+    {
+        return string.IsNullOrWhiteSpace(typeName) ||
+               string.Equals(typeName, RuleInsulationTypeDefault, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(typeName, "(Mặc định)", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool InsulationTypeContainsThickness(string typeName, double thicknessMm)
+    {
+        if (string.IsNullOrWhiteSpace(typeName) || thicknessMm <= 0.0)
+        {
+            return false;
+        }
+
+        string thickness = thicknessMm.ToString("0.####", CultureInfo.InvariantCulture);
+        string thicknessPattern = Regex.Escape(thickness).Replace("\\.", "[.,]");
+        return Regex.IsMatch(
+            typeName,
+            "(?<![0-9])" + thicknessPattern + "(?:[.,]0+)?(?![0-9])",
+            RegexOptions.CultureInvariant);
     }
 
     private PipeInsulationPresetItem FindPreset(string key)
@@ -821,7 +901,8 @@ public sealed class PipeInsulationWindow : Window
             System = rule == null ? "OTHER" : rule.System,
             MinDN = rule == null ? 0 : rule.MinDN,
             MaxDN = rule == null ? 0 : rule.MaxDN,
-            ThicknessMM = rule == null ? 0 : rule.ThicknessMM
+            ThicknessMM = rule == null ? 0 : rule.ThicknessMM,
+            InsulationTypeName = rule == null ? string.Empty : rule.InsulationTypeName ?? string.Empty
         };
     }
 
@@ -856,7 +937,7 @@ public sealed class PipeInsulationWindow : Window
             string json = File.ReadAllText(fileName);
             List<PipeInsulationRule> rules = new List<PipeInsulationRule>();
             foreach (Match match in Regex.Matches(json,
-                "\\{\\s*\\\"System\\\"\\s*:\\s*\\\"(?<system>(?:\\\\.|[^\\\"])*)\\\"\\s*,\\s*\\\"MinDN\\\"\\s*:\\s*(?<min>-?[0-9.]+)\\s*,\\s*\\\"MaxDN\\\"\\s*:\\s*(?<max>-?[0-9.]+)\\s*,\\s*\\\"ThicknessMM\\\"\\s*:\\s*(?<thickness>-?[0-9.]+)",
+                "\\{\\s*\\\"System\\\"\\s*:\\s*\\\"(?<system>(?:\\\\.|[^\\\"])*)\\\"\\s*,\\s*\\\"MinDN\\\"\\s*:\\s*(?<min>-?[0-9.]+)\\s*,\\s*\\\"MaxDN\\\"\\s*:\\s*(?<max>-?[0-9.]+)\\s*,\\s*\\\"ThicknessMM\\\"\\s*:\\s*(?<thickness>-?[0-9.]+)(?:\\s*,\\s*\\\"InsulationTypeName\\\"\\s*:\\s*\\\"(?<insulationTypeName>(?:\\\\.|[^\\\"])*)\\\")?\\s*\\}",
                 RegexOptions.CultureInvariant))
             {
                 double min;
@@ -871,7 +952,8 @@ public sealed class PipeInsulationWindow : Window
                         System = JsonUnescape(match.Groups["system"].Value),
                         MinDN = min,
                         MaxDN = max,
-                        ThicknessMM = thickness
+                        ThicknessMM = thickness,
+                        InsulationTypeName = JsonUnescape(match.Groups["insulationTypeName"].Value)
                     };
                     if (IsValidRule(rule))
                     {
@@ -896,7 +978,7 @@ public sealed class PipeInsulationWindow : Window
             Directory.CreateDirectory(SettingsDirectory);
             StringBuilder json = new StringBuilder();
             json.AppendLine("{");
-            json.AppendLine("  \"schemaVersion\": 1,");
+            json.AppendLine("  \"schemaVersion\": 2,");
             json.AppendLine("  \"userCustom\": [");
             for (int index = 0; index < rows.Count; index++)
             {
@@ -904,11 +986,12 @@ public sealed class PipeInsulationWindow : Window
                 string comma = index == rows.Count - 1 ? string.Empty : ",";
                 json.AppendFormat(
                     CultureInfo.InvariantCulture,
-                    "    {{\"System\":\"{0}\",\"MinDN\":{1},\"MaxDN\":{2},\"ThicknessMM\":{3}}}{4}{5}",
+                    "    {{\"System\":\"{0}\",\"MinDN\":{1},\"MaxDN\":{2},\"ThicknessMM\":{3},\"InsulationTypeName\":\"{4}\"}}{5}{6}",
                     JsonEscape(rule.System),
                     rule.MinDN,
                     rule.MaxDN,
                     rule.ThicknessMM,
+                    JsonEscape(rule.InsulationTypeName),
                     comma,
                     Environment.NewLine);
             }

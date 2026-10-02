@@ -20,6 +20,7 @@ public sealed class PipeInsulationRule
     public double MinDN { get; set; }
     public double MaxDN { get; set; }
     public double ThicknessMM { get; set; }
+    public string InsulationTypeName { get; set; } = string.Empty;
 }
 
 public static class PipeInsulationRules
@@ -214,22 +215,87 @@ public static class PipeInsulationRules
 
     public static double GetThicknessMm(Pipe pipe, IEnumerable<PipeInsulationRule> rules)
     {
-        return GetThicknessMm(SystemName(pipe), pipe == null ? 0.0 : pipe.Diameter * 304.8, rules);
+        PipeInsulationRule rule = FindMatchingPipeRule(pipe, rules);
+        return rule == null ? 0.0 : rule.ThicknessMM;
     }
 
     public static double GetFittingThicknessMm(Element fitting, double fittingSizeFt, IEnumerable<PipeInsulationRule> rules)
     {
-        return GetThicknessMm(FittingSystemName(fitting), fittingSizeFt * 304.8, rules);
+        PipeInsulationRule rule = FindMatchingPipeFittingRule(fitting, fittingSizeFt, rules);
+        return rule == null ? 0.0 : rule.ThicknessMM;
     }
 
     public static double GetDuctThicknessMm(Duct duct, double ductSizeFt, IEnumerable<PipeInsulationRule> rules)
     {
-        return GetThicknessMm(DuctSystemName(duct), ductSizeFt * 304.8, rules);
+        PipeInsulationRule rule = FindMatchingDuctRule(duct, ductSizeFt, rules);
+        return rule == null ? 0.0 : rule.ThicknessMM;
     }
 
     public static double GetDuctFittingThicknessMm(Element fitting, double fittingSizeFt, IEnumerable<PipeInsulationRule> rules)
     {
-        return GetThicknessMm(DuctFittingSystemName(fitting), fittingSizeFt * 304.8, rules);
+        PipeInsulationRule rule = FindMatchingDuctFittingRule(fitting, fittingSizeFt, rules);
+        return rule == null ? 0.0 : rule.ThicknessMM;
+    }
+
+    public static PipeInsulationRule FindMatchingPipeRule(Pipe pipe, IEnumerable<PipeInsulationRule> rules)
+    {
+        return FindMatchingRule(SystemName(pipe), pipe == null ? 0.0 : pipe.Diameter * 304.8, rules);
+    }
+
+    public static PipeInsulationRule FindMatchingPipeFittingRule(
+        Element fitting,
+        double fittingSizeFt,
+        IEnumerable<PipeInsulationRule> rules)
+    {
+        return FindMatchingRule(FittingSystemName(fitting), fittingSizeFt * 304.8, rules);
+    }
+
+    public static PipeInsulationRule FindMatchingDuctRule(
+        Duct duct,
+        double ductSizeFt,
+        IEnumerable<PipeInsulationRule> rules)
+    {
+        return FindMatchingRule(DuctSystemName(duct), ductSizeFt * 304.8, rules);
+    }
+
+    public static PipeInsulationRule FindMatchingDuctFittingRule(
+        Element fitting,
+        double fittingSizeFt,
+        IEnumerable<PipeInsulationRule> rules)
+    {
+        return FindMatchingRule(DuctFittingSystemName(fitting), fittingSizeFt * 304.8, rules);
+    }
+
+    public static PipeInsulationRule FindMatchingRule(
+        string systemName,
+        double sizeMm,
+        IEnumerable<PipeInsulationRule> rules)
+    {
+        if (sizeMm <= 0.0 || rules == null)
+        {
+            return null;
+        }
+
+        List<PipeInsulationRule> candidates = new List<PipeInsulationRule>(rules);
+
+        // A named system rule always wins over an ALL/OTHER fallback rule.
+        foreach (PipeInsulationRule rule in candidates)
+        {
+            if (IsUsableForSize(rule, sizeMm) && !IsFallbackPattern(rule.System) && Matches(systemName, rule.System))
+            {
+                return rule;
+            }
+        }
+
+        foreach (PipeInsulationRule rule in candidates)
+        {
+            if (IsUsableForSize(rule, sizeMm) && IsFallbackPattern(rule.System) && Matches(systemName, rule.System))
+            {
+                return rule;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -346,7 +412,7 @@ public static class PipeInsulationRules
     private static readonly string[][] SystemAliasGroups =
     {
         new[] { "CHWS", "CHWR", "CHW", "CHILLER", "CHILLED WATER", "CHILLED" },
-        new[] { "CDP", "CONDENSATE", "CONDENSATION", "DRAIN", "DRAINAGE" },
+        new[] { "CDP", "CDD", "CONDENSATE", "CONDENSATION", "DRAIN", "DRAINAGE" },
         new[] { "DHW", "HOT WATER", "HOTWATER" },
         new[] { "SA", "SUPPLY", "SUPPLY AIR", "GIO CAP", "GI\u00D3 C\u1EA4P" },
         new[] { "RA", "RETURN", "RETURN AIR", "GIO HOI", "GI\u00D3 H\u1ED2I" },
@@ -399,38 +465,9 @@ public static class PipeInsulationRules
             .ToArray());
     }
 
-    private static double GetThicknessMm(string systemName, double sizeMm, IEnumerable<PipeInsulationRule> rules)
-    {
-        if (sizeMm <= 0.0 || rules == null)
-        {
-            return 0.0;
-        }
-
-        List<PipeInsulationRule> candidates = new List<PipeInsulationRule>(rules);
-
-        // A named system rule always wins over an ALL/OTHER fallback rule.
-        foreach (PipeInsulationRule rule in candidates)
-        {
-            if (IsUsableForSize(rule, sizeMm) && !IsFallbackPattern(rule.System) && Matches(systemName, rule.System))
-            {
-                return rule.ThicknessMM;
-            }
-        }
-
-        foreach (PipeInsulationRule rule in candidates)
-        {
-            if (IsUsableForSize(rule, sizeMm) && IsFallbackPattern(rule.System) && Matches(systemName, rule.System))
-            {
-                return rule.ThicknessMM;
-            }
-        }
-
-        return 0.0;
-    }
-
     private static bool IsUsableForSize(PipeInsulationRule rule, double sizeMm)
     {
-        return rule != null && rule.ThicknessMM > 0.0 &&
+        return rule != null && rule.MinDN >= 0.0 && rule.MaxDN >= rule.MinDN && rule.ThicknessMM > 0.0 &&
                sizeMm >= rule.MinDN - 0.1 && sizeMm <= rule.MaxDN + 0.1;
     }
 
