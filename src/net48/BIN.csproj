@@ -20,12 +20,6 @@
     <Compile Include="..\net8.0-windows\BIN\FlexPipeDiagnostics.cs" Link="BIN\FlexPipeDiagnostics.cs" />
     <Compile Remove="BIN\DevCommandProxy.cs" />
     <Compile Include="..\net8.0-windows\BIN\DevCommandProxy.cs" Link="BIN\DevCommandProxy.cs" />
-    <Compile Remove="BIN\PipeInsulationRules.cs" />
-    <Compile Include="..\net8.0-windows\BIN\PipeInsulationRules.cs" Link="BIN\PipeInsulationRules.cs" />
-    <Compile Remove="BIN\PipeInsulationCmd.cs" />
-    <Compile Include="..\net8.0-windows\BIN\PipeInsulationCmd.cs" Link="BIN\PipeInsulationCmd.cs" />
-    <Compile Remove="BIN\PipeInsulationWindow.cs" />
-    <Compile Include="..\net8.0-windows\BIN\PipeInsulationWindow.cs" Link="BIN\PipeInsulationWindow.cs" />
     <Compile Remove="BIN\PipeClashGeometry.cs" />
     <Compile Include="..\net8.0-windows\BIN\PipeClashGeometry.cs" Link="BIN\PipeClashGeometry.cs" />
     <Compile Remove="BIN\CheckPipeClashWindow.cs" />
@@ -80,7 +74,6 @@
     <None Remove="36.-20select-20element\selectelementwindow.baml" />
     <None Remove="65.-20align-20support\alignsupportwindow.baml" />
     <None Remove="39.-20select-20by-20parameter\common\ui\progressbarview.baml" />
-    <None Remove="35.-20pipe-20insulation\pipeinsulationwindow.baml" />
     <EmbeddedResource Include="20.-20connect-20sprinkler-20to-20pipe\connectsprinklertopipewindow.baml" LogicalName="20.%20connect%20sprinkler%20to%20pipe/connectsprinklertopipewindow.baml" />
     <EmbeddedResource Include="13.-20export-20family\processbarview.baml" LogicalName="13.%20export%20family/processbarview.baml" />
     <EmbeddedResource Include="32.-20copy-20sheet\copysheetwindow.baml" LogicalName="32.%20copy%20sheet/copysheetwindow.baml" />
@@ -127,7 +120,6 @@
     <EmbeddedResource Include="36.-20select-20element\selectelementwindow.baml" LogicalName="36.%20select%20element/selectelementwindow.baml" />
     <EmbeddedResource Include="65.-20align-20support\alignsupportwindow.baml" LogicalName="65.%20align%20support/alignsupportwindow.baml" />
     <EmbeddedResource Include="39.-20select-20by-20parameter\common\ui\progressbarview.baml" LogicalName="39.%20select%20by%20parameter/common/ui/progressbarview.baml" />
-    <EmbeddedResource Include="35.-20pipe-20insulation\pipeinsulationwindow.baml" LogicalName="35.%20pipe%20insulation/pipeinsulationwindow.baml" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="RevitAPI">

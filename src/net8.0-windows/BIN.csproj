@@ -60,7 +60,6 @@
     <None Remove="36.-20select-20element\selectelementwindow.baml" />
     <None Remove="65.-20align-20support\alignsupportwindow.baml" />
     <None Remove="39.-20select-20by-20parameter\common\ui\progressbarview.baml" />
-    <None Remove="35.-20pipe-20insulation\pipeinsulationwindow.baml" />
     <EmbeddedResource Include="20.-20connect-20sprinkler-20to-20pipe\connectsprinklertopipewindow.baml" LogicalName="20.%20connect%20sprinkler%20to%20pipe/connectsprinklertopipewindow.baml" />
     <EmbeddedResource Include="13.-20export-20family\processbarview.baml" LogicalName="13.%20export%20family/processbarview.baml" />
     <EmbeddedResource Include="32.-20copy-20sheet\copysheetwindow.baml" LogicalName="32.%20copy%20sheet/copysheetwindow.baml" />
@@ -107,7 +106,6 @@
     <EmbeddedResource Include="36.-20select-20element\selectelementwindow.baml" LogicalName="36.%20select%20element/selectelementwindow.baml" />
     <EmbeddedResource Include="65.-20align-20support\alignsupportwindow.baml" LogicalName="65.%20align%20support/alignsupportwindow.baml" />
     <EmbeddedResource Include="39.-20select-20by-20parameter\common\ui\progressbarview.baml" LogicalName="39.%20select%20by%20parameter/common/ui/progressbarview.baml" />
-    <EmbeddedResource Include="35.-20pipe-20insulation\pipeinsulationwindow.baml" LogicalName="35.%20pipe%20insulation/pipeinsulationwindow.baml" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="RevitAPI">
