@@ -104,13 +104,17 @@ Tài liệu này là **Trung tâm tích lũy ý tưởng (Master Backlog)** củ
 
 ---
 
-### 💡 IDEA-06: CAD-to-BIM Telemetry Learning (Đặt Thiết Bị Thông Minh)
+### 💡 IDEA-06: CAD-to-BIM Telemetry Learning & Auto True Center (Rải Thiết Bị Thông Minh)
 - **Nhóm công cụ:** `BIM - MEP` (`PlaceFamilyCmd`).
 - **Mục tiêu:**
-  - Đã có khung kiến trúc Telemetry lưu trữ dữ liệu rải thiết bị.
-  - Ý tưởng tiếp theo:
-    - Khi kỹ sư click vào 1 block CAD (ví dụ block Miệng gió Diffuser hoặc block FCU), tool tự động nhận diện Block Name, Layer, và góc xoay.
-    - Tự động gắn Family Revit tương ứng vào đúng vị trí và góc xoay của toàn bộ các block tương tự trên mặt bằng chỉ trong 1 giây.
+  - Đã tích hợp **Auto True Geometric Center** (Phát hành trong bản `20261002-1346`):
+    - Tự động tìm **Tâm hình học thực tế** cho cả 2 trường hợp:
+      1. **Hình tròn (Sprinkler, Báo khói, Loa, Đèn downlight):** Tự động nhận diện tâm cụm đường tròn đồng tâm (như nắp chụp Ø65mm + vòng bảo vệ R2.3m), triệt tiêu hoàn toàn lỗi lệch Base Point 26m.
+      2. **Hình vuông / Chữ nhật (Miệng gió SAG, RAG, OAG, Grilles, Diffusers, FCU):** Tự động tìm tâm đối xứng khung bao, triệt tiêu lỗi lệch Base Point ở mép/góc (300mm - 424mm).
+    - Tự động thích ứng ma trận góc xoay (Rotation $0^\circ, 90^\circ, 180^\circ, 270^\circ$).
+    - Loại bỏ hoàn toàn sự phiền toái của việc phải bấm "Pick 2 điểm tọa độ" hoặc dùng lệnh Move thủ công sau khi rải!
+- **Lộ trình tiếp theo:** Tự động học vị trí FCU, Bơm, Miệng gió trực tiếp từ click chọn trên bản vẽ CAD.
+- **Trạng thái:** ✅ PARTIALLY RELEASED (True Center Engine: RELEASED trong bản `20261002-1346`).
 
 ---
 
