@@ -31,6 +31,7 @@ Tài liệu này là **Trung tâm tích lũy ý tưởng (Master Backlog)** củ
 | **IDEA-06** | BIM - MEP | **CAD-to-BIM Learning**: Tự động học vị trí Miệng gió, FCU, Bơm từ CAD sang Revit | Rất Cao | 📐 SPECIFIED |
 | **IDEA-07** | BIM - SUPPORT | **Auto Hanger/Support Spacing**: Tự rải giá treo theo khoảng cách tiêu chuẩn | Trung bình | 💡 PROPOSED |
 | **IDEA-08** | BIM - CHECK | **Clash & Clearance Matrix**: Quét nhanh khoảng cách an toàn ống với dầm/cột | Trung bình | 💡 PROPOSED |
+| **IDEA-09** | BIM - MEP | **Khử khối vuông ở Tê (Smooth Tee Insulation)**: Tự động làm mượt ngã ba chữ T | Rất Cao | 📐 SPECIFIED |
 
 ---
 
@@ -121,6 +122,22 @@ Tài liệu này là **Trung tâm tích lũy ý tưởng (Master Backlog)** củ
     - Ống DN32 - DN50: Khoảng cách 2.5m - 3.0m.
     - Ống $\ge$ DN65: Khoảng cách 3.5m - 4.0m.
   - Tự động rải Family Support bám vào đáy sàn bê tông bên trên, tự điều chỉnh chiều dài ty treo theo cao độ trần thực tế.
+
+---
+
+### 💡 IDEA-09: Khử Khối Vuông Ở Tê (Smooth Tee Insulation - Chế Độ Làm Mượt Ngã Ba Chữ T)
+- **Nhóm công cụ:** `BIM - MEP` (`PipeInsulationCmd`, `PipeInsulationWindow`).
+- **Vấn đề thực tế:**
+  - Khi bọc bảo ôn lên phụ kiện chữ T (`PipeFitting - Tee`), thuật toán đồ họa nội tại của Revit không giải được giao cắt 3 mặt cong nên tự động bọc một **khối hộp chữ nhật/lăng trụ vuông thô kệch** bao quanh Tê (nhìn trên 3D rất xấu, bị gù và không thực tế).
+- **Giải pháp kỹ thuật (Smooth Tee Option):**
+  - Bổ sung tùy chọn thông minh trên giao diện:
+    `[X] Khử khối vuông ở Tê (Smooth Tee Joints - Tự động làm mượt ngã ba chữ T)`
+  - Khi bật tùy chọn này:
+    - Tool vẫn bọc bảo ôn tròn cho toàn bộ **Ống chính (Header Pipe)**, **Ống nhánh (Branch Pipe)** và **Co cút (Elbow)**.
+    - Riêng phụ kiện **Tee (chữ T)**: Tool chủ động **bỏ qua không bọc khối hộp của Fitting Tê**.
+    - **Hiệu ứng đồ họa 3D:** Hai hình trụ bảo ôn tròn của Ống chính và Ống nhánh sẽ tự động đâm sát vào nhau tại ngã ba, tạo thành mối nối chữ T tròn trịa, trơn láng, tự nhiên như thợ thi công cắt mòi chữ V ngoài công trường, **biến mất hoàn toàn khối hộp vuông xấu xí**!
+  - Vẫn tính toán và xuất khối lượng BOQ đầy đủ dựa trên diện tích bề mặt ống.
+- **Trạng thái:** 📐 SPECIFIED (Đã có phương án, sẵn sàng tích hợp).
 
 ---
 
