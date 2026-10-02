@@ -17,7 +17,9 @@ public class PlaceFamilyWindow : Window, IComponentConnector
 {
 	private static string LastSelectedCadUnit = "Auto Detect (Tự động)";
 
-	private static bool LastCalibrateBasepoint = true;
+	private static bool LastUseTrueCenter = true;
+
+	private static bool LastCalibrateBasepoint;
 
 	private Document doc;
 
@@ -33,7 +35,9 @@ public class PlaceFamilyWindow : Window, IComponentConnector
 
 	public double elevation;
 
-	public bool IsCalibrateBasepoint { get; set; } = true;
+	public bool IsUseTrueCenter { get; set; } = true;
+
+	public bool IsCalibrateBasepoint { get; set; }
 
 	public string SelectedCadUnit { get; set; } = "Auto Detect (Tự động)";
 
@@ -50,6 +54,8 @@ public class PlaceFamilyWindow : Window, IComponentConnector
 	internal ComboBox cbbLevel;
 
 	internal TextBox tbDistance;
+
+	internal CheckBox cbUseTrueCenter;
 
 	internal CheckBox cbCalibrateBasepoint;
 
@@ -132,8 +138,10 @@ public class PlaceFamilyWindow : Window, IComponentConnector
 		if (double.TryParse(tbDistance.Text, out var value))
 		{
 			elevation = value;
+			IsUseTrueCenter = cbUseTrueCenter.IsChecked == true;
 			IsCalibrateBasepoint = cbCalibrateBasepoint.IsChecked == true;
 			LastSelectedCadUnit = SelectedCadUnit;
+			LastUseTrueCenter = IsUseTrueCenter;
 			LastCalibrateBasepoint = IsCalibrateBasepoint;
 			base.DialogResult = true;
 		}
@@ -231,6 +239,12 @@ public class PlaceFamilyWindow : Window, IComponentConnector
 		cbbTypeName = new ComboBox();
 		cbbLevel = new ComboBox();
 		tbDistance = new TextBox();
+		cbUseTrueCenter = new CheckBox
+		{
+			Content = "Tự động căn theo tâm hình học (True Center: Sprinkler tròn & Miệng gió vuông)",
+			IsChecked = LastUseTrueCenter,
+			VerticalAlignment = VerticalAlignment.Center
+		};
 		cbCalibrateBasepoint = new CheckBox
 		{
 			Content = "Căn chỉnh mốc theo giao điểm trục / điểm mốc (Grid Calibration)",
@@ -249,8 +263,14 @@ public class PlaceFamilyWindow : Window, IComponentConnector
 		AddRow("Elevation (mm)", tbDistance, 6);
 
 		grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+		cbUseTrueCenter.Margin = new Thickness(0.0, 3.0, 0.0, 7.0);
+		WpfGrid.SetRow(cbUseTrueCenter, 7);
+		WpfGrid.SetColumnSpan(cbUseTrueCenter, 2);
+		grid.Children.Add(cbUseTrueCenter);
+
+		grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 		cbCalibrateBasepoint.Margin = new Thickness(0.0, 3.0, 0.0, 7.0);
-		WpfGrid.SetRow(cbCalibrateBasepoint, 7);
+		WpfGrid.SetRow(cbCalibrateBasepoint, 8);
 		WpfGrid.SetColumnSpan(cbCalibrateBasepoint, 2);
 		grid.Children.Add(cbCalibrateBasepoint);
 
@@ -267,7 +287,7 @@ public class PlaceFamilyWindow : Window, IComponentConnector
 		btCancel.Click += btCancel_Click;
 		buttons.Children.Add(btOk);
 		buttons.Children.Add(btCancel);
-		WpfGrid.SetRow(buttons, 8);
+		WpfGrid.SetRow(buttons, 9);
 		WpfGrid.SetColumnSpan(buttons, 2);
 		grid.Children.Add(buttons);
 		Content = grid;

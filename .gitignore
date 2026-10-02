@@ -47,3 +47,7 @@ credentials.json
 # Python helper-script cache
 __pycache__/
 *.py[cod]
+
+# CAD samples and temp DXFs
+cad_samples/
+*.dxf

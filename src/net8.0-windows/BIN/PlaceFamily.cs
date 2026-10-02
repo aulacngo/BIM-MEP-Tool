@@ -73,6 +73,7 @@ public class PlaceFamily : IExternalCommand
 					string levelname = window.levelName;
 					string selectedCadUnit = window.SelectedCadUnit;
 					double elevation = window.elevation / 304.8;
+					bool useTrueCenter = window.IsUseTrueCenter;
 					bool calibrate = window.IsCalibrateBasepoint;
 					double deltaX = 0.0;
 					double deltaY = 0.0;
@@ -106,7 +107,7 @@ public class PlaceFamily : IExternalCommand
 						TaskDialog.Show("Lỗi", "Không tìm thấy Family Symbol: " + familyname + " / " + typename);
 						return Result.Failed;
 					}
-					List<XYZ> listBlockCad = PlaceFamilyUtils.GetListBlockCadByName(filecad, cadLinkType, cadBlock, selectedCadUnit);
+					List<XYZ> listBlockCad = PlaceFamilyUtils.GetListBlockCadByName(filecad, cadLinkType, cadBlock, selectedCadUnit, useTrueCenter);
 					if (listBlockCad == null || listBlockCad.Count == 0)
 					{
 						TaskDialog.Show("Lỗi", "Không tìm thấy block '" + cadBlock + "' trong Link CAD (không có điểm chèn nào).");
@@ -127,11 +128,12 @@ public class PlaceFamily : IExternalCommand
 						? $"({uniqueCadPoints[0].X:0.###}, {uniqueCadPoints[0].Y:0.###}, {uniqueCadPoints[0].Z:0.###}) ft"
 						: "None";
 					CommandDiagnostics.Write("PlaceFamily", "scan", commandData, Result.Succeeded,
-						$"Block={cadBlock}; Raw={rawPointCount}; Unique={uniqueCadPoints.Count}; SkippedExisting={skippedExisting}; ToPlace={pointsToPlace.Count}; FirstPoint={firstPoint}; Scan={PlaceFamilyUtils.LastBlockScanDiagnostics}");
+						$"Block={cadBlock}; UseTrueCenter={useTrueCenter}; Raw={rawPointCount}; Unique={uniqueCadPoints.Count}; SkippedExisting={skippedExisting}; ToPlace={pointsToPlace.Count}; FirstPoint={firstPoint}; Scan={PlaceFamilyUtils.LastBlockScanDiagnostics}");
 					CommandDiagnostics.WriteL2("PlaceFamily", "succeeded", "SCAN_COMPLETED", new
 					{
 						event_kind = "cad_block_scan",
 						block_name = cadBlock,
+						use_true_center = useTrueCenter,
 						is_dynamic_block = isDynamicBlock,
 						raw_points = rawPointCount,
 						unique_points = uniqueCadPoints.Count,
@@ -180,11 +182,12 @@ public class PlaceFamily : IExternalCommand
 							string actualPlacement = DescribePlacedInstances(doc, createdIds);
 							string idSummary = FormatIdSummary(createdIds);
 							CommandDiagnostics.Write("PlaceFamily", "placement", commandData, Result.Succeeded,
-								$"Block={cadBlock}; Raw={rawPointCount}; Unique={uniqueCadPoints.Count}; SkippedExisting={skippedExisting}; Created={createdIds.Count}; FirstPoint={firstPoint}; Ids={string.Join(",", createdIds)}; Actual={actualPlacement}; Scan={PlaceFamilyUtils.LastBlockScanDiagnostics}");
+								$"Block={cadBlock}; UseTrueCenter={useTrueCenter}; Raw={rawPointCount}; Unique={uniqueCadPoints.Count}; SkippedExisting={skippedExisting}; Created={createdIds.Count}; FirstPoint={firstPoint}; Ids={string.Join(",", createdIds)}; Actual={actualPlacement}; Scan={PlaceFamilyUtils.LastBlockScanDiagnostics}");
 							CommandDiagnostics.WriteL2("PlaceFamily", "succeeded", "PLACEMENT_COMPLETED", new
 							{
 								event_kind = "cad_block_placement",
 								block_name = cadBlock,
+								use_true_center = useTrueCenter,
 								is_dynamic_block = isDynamicBlock,
 								raw_points = rawPointCount,
 								unique_points = uniqueCadPoints.Count,
