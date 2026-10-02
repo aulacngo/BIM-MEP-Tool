@@ -1,11 +1,9 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Windows.Interop;
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Plumbing;
-using Autodesk.Revit.Exceptions;
 using Autodesk.Revit.UI;
 using Autodesk.Revit.UI.Selection;
 
@@ -15,40 +13,38 @@ namespace BIN;
 [Regeneration(RegenerationOption.Manual)]
 public class AvoidClashCmd : IExternalCommand
 {
+	private const double ConnectorToleranceFeet = 1e-4;
+	private const double GeometryToleranceFeet = 1e-6;
+	private const double MinimumOffsetFeet = 50.0 / 304.8;
+
 	public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
 	{
 		UIDocument uidoc = commandData.Application.ActiveUIDocument;
 		Document doc = uidoc.Document;
-
 		try
 		{
-			// 1. Pick running pipe (Ống cần uốn)
 			Reference refPipe = uidoc.Selection.PickObject(
-				ObjectType.Element, 
-				new SelectPipes(), 
-				"1. Click ch\u1ecdn \u1ed0NG c\u1ea7n u\u1ed1n \u0111\u1ec3 n\u00e9 va ch\u1ea1m (Running Pipe)"
-			);
+				ObjectType.Element,
+				new AvoidClashPipeSelectionFilter(),
+				"1. Click chon ONG can uon de ne va cham (Running Pipe)");
 			if (refPipe == null) return Result.Cancelled;
 
 			Element runningPipeElem = doc.GetElement(refPipe);
 			if (runningPipeElem == null) return Result.Cancelled;
 
-			// 2. Pick obstacle (Vật cản)
 			Reference refObstacle = uidoc.Selection.PickObject(
-				ObjectType.Element, 
-				"2. Click ch\u1ecdn V\u1eacT C\u1ea2N (\u1ed0ng, \u1ed0ng gi\u00f3, M\u00e1ng c\u00e1p ho\u1eb7c D\u1ea7m k\u1ebft c\u1ea5u)"
-			);
+				ObjectType.Element,
+				new AvoidClashObstacleSelectionFilter(),
+				"2. Click chon VAT CAN (Ong, Ong gio, Mang cap, Tuong, San hoac Dam ket cau)");
 			if (refObstacle == null) return Result.Cancelled;
 
 			Element obstacleElem = doc.GetElement(refObstacle);
 			if (obstacleElem == null) return Result.Cancelled;
 
-			// 3. Show modern AvoidClashWindow
 			AvoidClashWindow window = new AvoidClashWindow(uidoc, runningPipeElem, obstacleElem);
 			IntPtr h = commandData.Application.MainWindowHandle;
 			if (h != IntPtr.Zero) new WindowInteropHelper(window).Owner = h;
 			window.ShowDialog();
-
 			return Result.Succeeded;
 		}
 		catch (Autodesk.Revit.Exceptions.OperationCanceledException)
@@ -66,7 +62,6 @@ public class AvoidClashCmd : IExternalCommand
 		double angleDeg, BypassDirection dir, double clearanceMm, out string error)
 	{
 		error = string.Empty;
-
 		Pipe pipe = runningPipeElem as Pipe;
 		if (pipe == null)
 		{
@@ -78,214 +73,551 @@ public class AvoidClashCmd : IExternalCommand
 		Line pipeLine = locCurve?.Curve as Line;
 		if (pipeLine == null)
 		{
-			error = "Khong lay duoc truc tim cua ong.";
+			error = "Khong lay duoc truc tim dang thang cua ong.";
 			return false;
 		}
 
 		XYZ pStart = pipeLine.GetEndPoint(0);
 		XYZ pEnd = pipeLine.GetEndPoint(1);
-		XYZ pipeDir = (pEnd - pStart).Normalize();
 		double pipeLength = pipeLine.Length;
-
-		double pipeDiameter = pipe.get_Parameter(BuiltInParameter.RBS_PIPE_DIAMETER_PARAM)?.AsDouble() ?? (50.0 / 304.8);
-		double pipeRadius = pipeDiameter * 0.5;
-
-		ElementId sysTypeId = pipe.MEPSystem?.GetTypeId() ?? pipe.get_Parameter(BuiltInParameter.RBS_PIPING_SYSTEM_TYPE_PARAM)?.AsElementId();
-		if (sysTypeId == null || sysTypeId == ElementId.InvalidElementId)
+		if (pipeLength <= GeometryToleranceFeet)
 		{
-			sysTypeId = pipe.get_Parameter(BuiltInParameter.RBS_PIPING_SYSTEM_TYPE_PARAM)?.AsElementId();
-		}
-		ElementId pipeTypeId = pipe.PipeType.Id;
-		ElementId levelId = pipe.ReferenceLevel?.Id ?? pipe.LevelId;
-
-		// Determine Obstacle center & half extent
-		XYZ obsCenter = XYZ.Zero;
-		double obsRadius = 100.0 / 304.8; // default 100mm
-
-		if (obstacleElem is MEPCurve obsMep)
-		{
-			LocationCurve obsLoc = obsMep.Location as LocationCurve;
-			Line obsLine = obsLoc?.Curve as Line;
-			if (obsLine != null)
-			{
-				XYZ q0 = obsLine.GetEndPoint(0);
-				XYZ q1 = obsLine.GetEndPoint(1);
-				XYZ obsDir = (q1 - q0).Normalize();
-
-				// Closest approach point between two 3D lines
-				obsCenter = FindClosestPointOnLine(pStart, pipeDir, q0, obsDir);
-
-				double obsDiam = obsMep.get_Parameter(BuiltInParameter.RBS_PIPE_DIAMETER_PARAM)?.AsDouble()
-					?? obsMep.get_Parameter(BuiltInParameter.RBS_CURVE_HEIGHT_PARAM)?.AsDouble()
-					?? (150.0 / 304.8);
-				obsRadius = obsDiam * 0.5;
-			}
-			else
-			{
-				BoundingBoxXYZ bb = obstacleElem.get_BoundingBox(null);
-				obsCenter = (bb.Min + bb.Max) * 0.5;
-				obsRadius = Math.Max(bb.Max.X - bb.Min.X, Math.Max(bb.Max.Y - bb.Min.Y, bb.Max.Z - bb.Min.Z)) * 0.5;
-			}
-		}
-		else
-		{
-			BoundingBoxXYZ bb = obstacleElem.get_BoundingBox(null);
-			if (bb != null)
-			{
-				obsCenter = (bb.Min + bb.Max) * 0.5;
-				obsRadius = (bb.Max.Z - bb.Min.Z) * 0.5;
-			}
-			else
-			{
-				error = "Khong xac dinh duoc vi tri cua vat can.";
-				return false;
-			}
-		}
-
-		// Project obstacle center onto pipe line
-		double tProj = (obsCenter - pStart).DotProduct(pipeDir);
-		XYZ pint = pStart + pipeDir * tProj;
-
-		// Calculate Bypass Direction Vector U
-		XYZ uDir = XYZ.BasisZ;
-		if (dir == BypassDirection.Up)
-		{
-			uDir = XYZ.BasisZ;
-		}
-		else if (dir == BypassDirection.Down)
-		{
-			uDir = -XYZ.BasisZ;
-		}
-		else
-		{
-			XYZ horiz = new XYZ(pipeDir.X, pipeDir.Y, 0.0).Normalize();
-			XYZ perp = new XYZ(-horiz.Y, horiz.X, 0.0);
-			uDir = (dir == BypassDirection.Left) ? perp : -perp;
-		}
-
-		double clearanceFeet = clearanceMm / 304.8;
-		double jumpHeight = pipeRadius + obsRadius + clearanceFeet;
-		double halfSpan = Math.Max(obsRadius, 100.0 / 304.8) + (50.0 / 304.8);
-		double slopeRun = (angleDeg == 45.0) ? jumpHeight : Math.Max(pipeRadius * 2.0, 60.0 / 304.8);
-
-		XYZ c1 = pint - pipeDir * (halfSpan + slopeRun);
-		XYZ c2 = pint - pipeDir * halfSpan + uDir * jumpHeight;
-		XYZ c3 = pint + pipeDir * halfSpan + uDir * jumpHeight;
-		XYZ c4 = pint + pipeDir * (halfSpan + slopeRun);
-
-		// Check if bypass points fit on the pipe
-		double tC1 = (c1 - pStart).DotProduct(pipeDir);
-		double tC4 = (c4 - pStart).DotProduct(pipeDir);
-
-		if (tC1 <= 0.1 || tC4 >= pipeLength - 0.1)
-		{
-			error = "Doan ong qua ngan de chen 4 cut ne va cham. Vui long giam khoang ho hoac chon vi tri khac.";
+			error = "Doan ong duoc chon qua ngan.";
 			return false;
 		}
 
+		XYZ pipeDir = (pEnd - pStart).Normalize();
+		double pipeDiameter = pipe.get_Parameter(BuiltInParameter.RBS_PIPE_DIAMETER_PARAM)?.AsDouble() ?? (50.0 / 304.8);
+		double pipeRadius = pipeDiameter * 0.5;
+		ElementId sysTypeId = pipe.MEPSystem?.GetTypeId()
+			?? pipe.get_Parameter(BuiltInParameter.RBS_PIPING_SYSTEM_TYPE_PARAM)?.AsElementId();
+		if (sysTypeId == null || sysTypeId == ElementId.InvalidElementId)
+		{
+			error = "Khong xac dinh duoc Piping System Type cua ong.";
+			return false;
+		}
+
+		ElementId pipeTypeId = pipe.PipeType.Id;
+		ElementId levelId = pipe.ReferenceLevel?.Id ?? pipe.LevelId;
+		if (levelId == null || levelId == ElementId.InvalidElementId)
+		{
+			error = "Khong xac dinh duoc Level cua ong.";
+			return false;
+		}
+
+		if (!GetCrossingSpan(pipe, obstacleElem, out XYZ pEntry, out XYZ pExit, out double obsBottomZ, out double obsTopZ))
+		{
+			error = "Khong xac dinh duoc vi tri ong cat qua vat can. Hay chon vat can co hinh hoc hop le.";
+			return false;
+		}
+
+		double clearanceFeet = clearanceMm / 304.8;
+		double spanMargin = Math.Max(clearanceFeet, MinimumOffsetFeet);
+		XYZ pClearEntry = pEntry - pipeDir * spanMargin;
+		XYZ pClearExit = pExit + pipeDir * spanMargin;
+
+		XYZ uDir;
+		double vOffset;
+		if (dir == BypassDirection.Down)
+		{
+			double targetZ = obsBottomZ - pipeRadius - clearanceFeet;
+			vOffset = pStart.Z - targetZ;
+			if (vOffset < MinimumOffsetFeet) vOffset = 100.0 / 304.8;
+			uDir = -XYZ.BasisZ;
+		}
+		else if (dir == BypassDirection.Up)
+		{
+			double targetZ = obsTopZ + pipeRadius + clearanceFeet;
+			vOffset = targetZ - pStart.Z;
+			if (vOffset < MinimumOffsetFeet) vOffset = 100.0 / 304.8;
+			uDir = XYZ.BasisZ;
+		}
+		else
+		{
+			XYZ horizontalDirection = new XYZ(pipeDir.X, pipeDir.Y, 0.0);
+			if (horizontalDirection.GetLength() <= GeometryToleranceFeet)
+			{
+				error = "Khong the ne Trai/Phai cho ong dung. Hay chon Len hoac Xuong.";
+				return false;
+			}
+
+			XYZ horiz = horizontalDirection.Normalize();
+			XYZ perp = new XYZ(-horiz.Y, horiz.X, 0.0);
+			uDir = dir == BypassDirection.Left ? perp : -perp;
+			double obstacleWidth = GetObstacleWidthAlongDirection(obstacleElem, uDir);
+			vOffset = obstacleWidth * 0.5 + pipeRadius + clearanceFeet;
+		}
+
+		double slopeRun = angleDeg == 45.0
+			? vOffset
+			: Math.Max(pipeRadius * 2.0, 60.0 / 304.8);
+		XYZ c2 = pClearEntry + uDir * vOffset;
+		XYZ c3 = pClearExit + uDir * vOffset;
+		XYZ c1 = pClearEntry - pipeDir * slopeRun;
+		XYZ c4 = pClearExit + pipeDir * slopeRun;
+
+		double tC1 = (c1 - pStart).DotProduct(pipeDir);
+		double tC4 = (c4 - pStart).DotProduct(pipeDir);
+		if (tC1 <= 0.05 || tC4 >= pipeLength - 0.05)
+		{
+			error = "Doan ong qua ngan (can toi thieu "
+				+ Math.Round((c4 - c1).GetLength() * 304.8)
+				+ " mm de ne dam). Vui long chon vi tri hoac khoang ho nho hon.";
+			return false;
+		}
+
+		// Reconnect the original pEnd relationship after replacing that end segment.
+		Connector endConn = GetConnectorAt(pipe, pEnd);
+		Connector otherConn = GetConnectedRef(endConn);
 		using (Transaction tr = new Transaction(doc, "BIM - Avoid Clash Bypass"))
 		{
 			FailureHandlingOptions failOpt = tr.GetFailureHandlingOptions();
 			failOpt.SetFailuresPreprocessor(new SuppressAllWarnings());
 			tr.SetFailureHandlingOptions(failOpt);
-
 			tr.Start();
 			try
 			{
-				// 1. Shorten original pipe from pStart to c1
+				if (endConn != null && otherConn != null && IsConnectedTo(endConn, otherConn))
+				{
+					endConn.DisconnectFrom(otherConn);
+				}
+
 				locCurve.Curve = Line.CreateBound(pStart, c1);
-
-				// 2. Create pipe 2: up-slope (c1 to c2)
-				Pipe pipeSlope1 = Pipe.Create(doc, sysTypeId, pipeTypeId, levelId, c1, c2);
-				pipeSlope1.get_Parameter(BuiltInParameter.RBS_PIPE_DIAMETER_PARAM)?.Set(pipeDiameter);
-
-				// 3. Create pipe 3: bridge over obstacle (c2 to c3)
-				Pipe pipeBridge = Pipe.Create(doc, sysTypeId, pipeTypeId, levelId, c2, c3);
-				pipeBridge.get_Parameter(BuiltInParameter.RBS_PIPE_DIAMETER_PARAM)?.Set(pipeDiameter);
-
-				// 4. Create pipe 4: down-slope (c3 to c4)
-				Pipe pipeSlope2 = Pipe.Create(doc, sysTypeId, pipeTypeId, levelId, c3, c4);
-				pipeSlope2.get_Parameter(BuiltInParameter.RBS_PIPE_DIAMETER_PARAM)?.Set(pipeDiameter);
-
-				// 5. Create pipe 5: end segment (c4 to pEnd)
-				Pipe pipeEnd = Pipe.Create(doc, sysTypeId, pipeTypeId, levelId, c4, pEnd);
-				pipeEnd.get_Parameter(BuiltInParameter.RBS_PIPE_DIAMETER_PARAM)?.Set(pipeDiameter);
-
+				Pipe pipeSlope1 = CreatePipe(doc, sysTypeId, pipeTypeId, levelId, c1, c2, pipeDiameter);
+				Pipe pipeBridge = CreatePipe(doc, sysTypeId, pipeTypeId, levelId, c2, c3, pipeDiameter);
+				Pipe pipeSlope2 = CreatePipe(doc, sysTypeId, pipeTypeId, levelId, c3, c4, pipeDiameter);
+				Pipe pipeEnd = CreatePipe(doc, sysTypeId, pipeTypeId, levelId, c4, pEnd, pipeDiameter);
 				doc.Regenerate();
 
-				// Connect Elbow 1 at c1
-				ConnectPipesWithElbow(doc, pipe, pipeSlope1, c1);
+				List<string> elbowDiagnostics = new List<string>();
+				if (!ConnectPipesWithElbow(doc, pipe, pipeSlope1, c1, elbowDiagnostics)
+					|| !ConnectPipesWithElbow(doc, pipeSlope1, pipeBridge, c2, elbowDiagnostics)
+					|| !ConnectPipesWithElbow(doc, pipeBridge, pipeSlope2, c3, elbowDiagnostics)
+					|| !ConnectPipesWithElbow(doc, pipeSlope2, pipeEnd, c4, elbowDiagnostics))
+				{
+					throw new InvalidOperationException("Khong the tao elbow cho bypass: " + string.Join(" | ", elbowDiagnostics));
+				}
 
-				// Connect Elbow 2 at c2
-				ConnectPipesWithElbow(doc, pipeSlope1, pipeBridge, c2);
-
-				// Connect Elbow 3 at c3
-				ConnectPipesWithElbow(doc, pipeBridge, pipeSlope2, c3);
-
-				// Connect Elbow 4 at c4
-				ConnectPipesWithElbow(doc, pipeSlope2, pipeEnd, c4);
-
+				if (otherConn != null) ReconnectEndConnector(pipeEnd, pEnd, otherConn);
 				tr.Commit();
 				return true;
 			}
 			catch (Exception ex)
 			{
-				tr.RollBack();
+				if (tr.GetStatus() == TransactionStatus.Started) tr.RollBack();
 				error = ex.Message;
 				return false;
 			}
 		}
 	}
 
-	private static void ConnectPipesWithElbow(Document doc, Pipe p1, Pipe p2, XYZ nearPt)
+	private static Pipe CreatePipe(Document doc, ElementId systemTypeId, ElementId pipeTypeId,
+		ElementId levelId, XYZ start, XYZ end, double diameter)
 	{
+		Pipe result = Pipe.Create(doc, systemTypeId, pipeTypeId, levelId, start, end);
+		result.get_Parameter(BuiltInParameter.RBS_PIPE_DIAMETER_PARAM)?.Set(diameter);
+		return result;
+	}
+
+	// Solid intersection is the authority. The fallback never uses a beam midpoint.
+	private static bool GetCrossingSpan(Pipe pipe, Element obstacle, out XYZ pEntry, out XYZ pExit,
+		out double obsBottomZ, out double obsTopZ)
+	{
+		pEntry = null;
+		pExit = null;
+		obsBottomZ = 0.0;
+		obsTopZ = 0.0;
+		Line pipeLine = (pipe.Location as LocationCurve)?.Curve as Line;
+		if (pipeLine == null) return false;
+
+		XYZ pStart = pipeLine.GetEndPoint(0);
+		XYZ pipeDir = (pipeLine.GetEndPoint(1) - pStart).Normalize();
+		BoundingBoxXYZ obstacleBox = obstacle.get_BoundingBox(null);
+		double minT = double.MaxValue;
+		double maxT = double.MinValue;
+		double solidBottom = double.MaxValue;
+		double solidTop = double.MinValue;
+		bool foundSolidIntersection = false;
+
+		Options options = new Options
+		{
+			DetailLevel = ViewDetailLevel.Fine,
+			ComputeReferences = false,
+			IncludeNonVisibleObjects = false
+		};
 		try
 		{
-			Connector c1 = GetClosestConnector(p1, nearPt);
-			Connector c2 = GetClosestConnector(p2, nearPt);
-			if (c1 != null && c2 != null && !c1.IsConnected && !c2.IsConnected)
+			foreach (Solid solid in GetSolids(obstacle.get_Geometry(options)))
 			{
-				doc.Create.NewElbowFitting(c1, c2);
+				SolidCurveIntersection result;
+				try
+				{
+					result = solid.IntersectWithCurve(pipeLine, new SolidCurveIntersectionOptions
+					{
+						ResultType = SolidCurveIntersectionMode.CurveSegmentsInside
+					});
+				}
+				catch
+				{
+					continue;
+				}
+
+				for (int i = 0; i < result.SegmentCount; i++)
+				{
+					Curve segment = result.GetCurveSegment(i);
+					if (segment == null || segment.Length <= GeometryToleranceFeet) continue;
+					double segmentStartT = (segment.GetEndPoint(0) - pStart).DotProduct(pipeDir);
+					double segmentEndT = (segment.GetEndPoint(1) - pStart).DotProduct(pipeDir);
+					minT = Math.Min(minT, Math.Min(segmentStartT, segmentEndT));
+					maxT = Math.Max(maxT, Math.Max(segmentStartT, segmentEndT));
+					foundSolidIntersection = true;
+					if (TryGetBoundingBoxZ(solid.GetBoundingBox(), out double solidMinZ, out double solidMaxZ))
+					{
+						solidBottom = Math.Min(solidBottom, solidMinZ);
+						solidTop = Math.Max(solidTop, solidMaxZ);
+					}
+				}
 			}
 		}
-		catch { }
+		catch
+		{
+			// Fall through to the centerline/bounding-box calculation.
+		}
+
+		if (foundSolidIntersection)
+		{
+			pEntry = pStart + pipeDir * minT;
+			pExit = pStart + pipeDir * maxT;
+			if (!OrderCrossingPoints(pStart, pipeDir, ref pEntry, ref pExit)) return false;
+			if (solidBottom != double.MaxValue && solidTop != double.MinValue)
+			{
+				obsBottomZ = solidBottom;
+				obsTopZ = solidTop;
+				return true;
+			}
+			return TryGetBoundingBoxZ(obstacleBox, out obsBottomZ, out obsTopZ);
+		}
+
+		if (obstacleBox == null || !TryGetBoundingBoxZ(obstacleBox, out obsBottomZ, out obsTopZ)) return false;
+		Line obstacleLine = (obstacle.Location as LocationCurve)?.Curve as Line;
+		if (obstacleLine != null)
+		{
+			FindClosestPointsBetweenLines(pipeLine, obstacleLine, out XYZ closestOnPipe, out XYZ closestOnObstacle);
+			if (TryGetLineBoundingBoxIntersection(pipeLine, obstacleBox, out pEntry, out pExit))
+			{
+				return OrderCrossingPoints(pStart, pipeDir, ref pEntry, ref pExit);
+			}
+
+			double fallbackThickness = GetBoundingBoxWidthAlongDirection(obstacleBox, pipeDir);
+			if (fallbackThickness <= GeometryToleranceFeet) return false;
+			pEntry = closestOnPipe - pipeDir * fallbackThickness * 0.5;
+			pExit = closestOnPipe + pipeDir * fallbackThickness * 0.5;
+			return OrderCrossingPoints(pStart, pipeDir, ref pEntry, ref pExit);
+		}
+
+		return TryGetLineBoundingBoxIntersection(pipeLine, obstacleBox, out pEntry, out pExit)
+			&& OrderCrossingPoints(pStart, pipeDir, ref pEntry, ref pExit);
 	}
 
-	private static Connector GetClosestConnector(Pipe p, XYZ pt)
+	private static IEnumerable<Solid> GetSolids(GeometryElement geometry)
 	{
-		if (p == null || p.ConnectorManager == null) return null;
+		if (geometry == null) yield break;
+		foreach (GeometryObject item in geometry)
+		{
+			Solid solid = item as Solid;
+			if (solid != null && solid.Faces.Size > 0 && solid.Edges.Size > 0)
+			{
+				yield return solid;
+				continue;
+			}
+
+			GeometryInstance instance = item as GeometryInstance;
+			if (instance == null) continue;
+			GeometryElement instanceGeometry;
+			try { instanceGeometry = instance.GetInstanceGeometry(); }
+			catch { continue; }
+			foreach (Solid instanceSolid in GetSolids(instanceGeometry)) yield return instanceSolid;
+		}
+	}
+
+	// Closest points are constrained to both finite LocationCurve segments.
+	private static bool FindClosestPointsBetweenLines(Line first, Line second, out XYZ firstPoint, out XYZ secondPoint)
+	{
+		XYZ p0 = first.GetEndPoint(0);
+		XYZ q0 = second.GetEndPoint(0);
+		XYZ firstVector = first.GetEndPoint(1) - p0;
+		XYZ secondVector = second.GetEndPoint(1) - q0;
+		XYZ separation = p0 - q0;
+		double a = firstVector.DotProduct(firstVector);
+		double e = secondVector.DotProduct(secondVector);
+		double f = secondVector.DotProduct(separation);
+		double s;
+		double t;
+
+		if (a <= GeometryToleranceFeet && e <= GeometryToleranceFeet)
+		{
+			firstPoint = p0;
+			secondPoint = q0;
+			return false;
+		}
+		if (a <= GeometryToleranceFeet)
+		{
+			s = 0.0;
+			t = Clamp(f / e, 0.0, 1.0);
+		}
+		else
+		{
+			double c = firstVector.DotProduct(separation);
+			if (e <= GeometryToleranceFeet)
+			{
+				t = 0.0;
+				s = Clamp(-c / a, 0.0, 1.0);
+			}
+			else
+			{
+				double b = firstVector.DotProduct(secondVector);
+				double denominator = a * e - b * b;
+				s = Math.Abs(denominator) > GeometryToleranceFeet
+					? Clamp((b * f - c * e) / denominator, 0.0, 1.0)
+					: 0.0;
+				double tNumerator = b * s + f;
+				if (tNumerator <= 0.0)
+				{
+					t = 0.0;
+					s = Clamp(-c / a, 0.0, 1.0);
+				}
+				else if (tNumerator >= e)
+				{
+					t = 1.0;
+					s = Clamp((b - c) / a, 0.0, 1.0);
+				}
+				else t = tNumerator / e;
+			}
+		}
+
+		firstPoint = p0 + firstVector * s;
+		secondPoint = q0 + secondVector * t;
+		return true;
+	}
+
+	private static bool TryGetLineBoundingBoxIntersection(Line line, BoundingBoxXYZ box, out XYZ pEntry, out XYZ pExit)
+	{
+		pEntry = null;
+		pExit = null;
+		if (box == null) return false;
+		XYZ modelStart = line.GetEndPoint(0);
+		XYZ modelDir = (line.GetEndPoint(1) - modelStart).Normalize();
+		Transform inverse = box.Transform == null ? null : box.Transform.Inverse;
+		XYZ localStart = inverse == null ? modelStart : inverse.OfPoint(modelStart);
+		XYZ localDir = inverse == null ? modelDir : inverse.OfVector(modelDir);
+		double entryT = 0.0;
+		double exitT = line.Length;
+		if (!ClipLineToSlab(localStart.X, localDir.X, box.Min.X, box.Max.X, ref entryT, ref exitT)
+			|| !ClipLineToSlab(localStart.Y, localDir.Y, box.Min.Y, box.Max.Y, ref entryT, ref exitT)
+			|| !ClipLineToSlab(localStart.Z, localDir.Z, box.Min.Z, box.Max.Z, ref entryT, ref exitT)
+			|| exitT - entryT <= GeometryToleranceFeet)
+		{
+			return false;
+		}
+		pEntry = modelStart + modelDir * entryT;
+		pExit = modelStart + modelDir * exitT;
+		return true;
+	}
+
+	private static bool ClipLineToSlab(double origin, double direction, double min, double max, ref double entryT, ref double exitT)
+	{
+		if (Math.Abs(direction) <= GeometryToleranceFeet) return origin >= min && origin <= max;
+		double first = (min - origin) / direction;
+		double second = (max - origin) / direction;
+		if (first > second)
+		{
+			double swap = first;
+			first = second;
+			second = swap;
+		}
+		entryT = Math.Max(entryT, first);
+		exitT = Math.Min(exitT, second);
+		return entryT <= exitT;
+	}
+
+	private static bool OrderCrossingPoints(XYZ pStart, XYZ pipeDir, ref XYZ pEntry, ref XYZ pExit)
+	{
+		if (pEntry == null || pExit == null || pEntry.DistanceTo(pExit) <= GeometryToleranceFeet) return false;
+		if ((pEntry - pStart).DotProduct(pipeDir) > (pExit - pStart).DotProduct(pipeDir))
+		{
+			XYZ swap = pEntry;
+			pEntry = pExit;
+			pExit = swap;
+		}
+		return true;
+	}
+
+	private static bool TryGetBoundingBoxZ(BoundingBoxXYZ box, out double minZ, out double maxZ)
+	{
+		minZ = double.MaxValue;
+		maxZ = double.MinValue;
+		if (box == null) return false;
+		foreach (XYZ point in GetBoundingBoxCorners(box))
+		{
+			minZ = Math.Min(minZ, point.Z);
+			maxZ = Math.Max(maxZ, point.Z);
+		}
+		return minZ != double.MaxValue && maxZ != double.MinValue;
+	}
+
+	private static double GetObstacleWidthAlongDirection(Element obstacle, XYZ direction)
+	{
+		return Math.Max(GetBoundingBoxWidthAlongDirection(obstacle.get_BoundingBox(null), direction), MinimumOffsetFeet);
+	}
+
+	private static double GetBoundingBoxWidthAlongDirection(BoundingBoxXYZ box, XYZ direction)
+	{
+		if (box == null) return 0.0;
+		double minProjection = double.MaxValue;
+		double maxProjection = double.MinValue;
+		foreach (XYZ point in GetBoundingBoxCorners(box))
+		{
+			double projection = point.DotProduct(direction);
+			minProjection = Math.Min(minProjection, projection);
+			maxProjection = Math.Max(maxProjection, projection);
+		}
+		return minProjection == double.MaxValue ? 0.0 : maxProjection - minProjection;
+	}
+
+	private static IEnumerable<XYZ> GetBoundingBoxCorners(BoundingBoxXYZ box)
+	{
+		Transform transform = box.Transform;
+		double[] xs = { box.Min.X, box.Max.X };
+		double[] ys = { box.Min.Y, box.Max.Y };
+		double[] zs = { box.Min.Z, box.Max.Z };
+		foreach (double x in xs)
+		foreach (double y in ys)
+		foreach (double z in zs)
+		{
+			XYZ point = new XYZ(x, y, z);
+			yield return transform == null ? point : transform.OfPoint(point);
+		}
+	}
+
+	private static bool ConnectPipesWithElbow(Document doc, Pipe firstPipe, Pipe secondPipe, XYZ point, ICollection<string> diagnostics)
+	{
+		Connector first = GetConnectorAt(firstPipe, point);
+		Connector second = GetConnectorAt(secondPipe, point);
+		if (first == null || second == null)
+		{
+			diagnostics.Add("Khong tim thay connector tai " + FormatPoint(point) + ".");
+			return false;
+		}
+		if (IsConnectedTo(first, second)) return true;
+		if (first.IsConnected || second.IsConnected)
+		{
+			diagnostics.Add("Connector tai " + FormatPoint(point) + " da ket noi voi phan tu khac.");
+			return false;
+		}
+		try
+		{
+			doc.Create.NewElbowFitting(first, second);
+			return true;
+		}
+		catch (Exception ex)
+		{
+			diagnostics.Add("NewElbowFitting tai " + FormatPoint(point) + " that bai: " + ex.Message);
+			return false;
+		}
+	}
+
+	private static void ReconnectEndConnector(Pipe pipeEnd, XYZ pEnd, Connector otherConn)
+	{
+		Connector replacementEnd = GetConnectorAt(pipeEnd, pEnd);
+		if (replacementEnd == null) throw new InvalidOperationException("Khong tim thay connector dau cuoi cua ong thay the.");
+		if (!IsConnectedTo(replacementEnd, otherConn))
+		{
+			if (replacementEnd.IsConnected) throw new InvalidOperationException("Connector dau cuoi cua ong thay the dang ket noi sai phan tu.");
+			replacementEnd.ConnectTo(otherConn);
+		}
+		if (!IsConnectedTo(replacementEnd, otherConn)) throw new InvalidOperationException("Khong the khoi phuc ket noi tai dau cuoi ong.");
+	}
+
+	private static Connector GetConnectorAt(Pipe pipe, XYZ point)
+	{
+		if (pipe == null || pipe.ConnectorManager == null || point == null) return null;
 		Connector closest = null;
-		double minDist = double.MaxValue;
-		foreach (Connector c in p.ConnectorManager.Connectors)
+		double closestDistance = double.MaxValue;
+		foreach (Connector connector in pipe.ConnectorManager.Connectors)
 		{
-			double dist = c.Origin.DistanceTo(pt);
-			if (dist < minDist)
+			double distance = connector.Origin.DistanceTo(point);
+			if (distance < closestDistance)
 			{
-				minDist = dist;
-				closest = c;
+				closest = connector;
+				closestDistance = distance;
 			}
 		}
-		return closest;
+		return closestDistance <= ConnectorToleranceFeet ? closest : null;
 	}
 
-	private static XYZ FindClosestPointOnLine(XYZ p1, XYZ dir1, XYZ p2, XYZ dir2)
+	private static Connector GetConnectedRef(Connector connector)
 	{
-		XYZ p13 = p1 - p2;
-		double d1343 = p13.DotProduct(dir2);
-		double d4321 = dir2.DotProduct(dir1);
-		double d1321 = p13.DotProduct(dir1);
-		double d4343 = dir2.DotProduct(dir2);
-		double d2121 = dir1.DotProduct(dir1);
-
-		double denom = d2121 * d4343 - d4321 * d4321;
-		if (Math.Abs(denom) < 1e-6)
+		if (connector == null || !connector.IsConnected) return null;
+		foreach (Connector reference in connector.AllRefs)
 		{
-			// Parallel lines
-			return p1;
+			if (reference != null && reference.Owner != null && connector.Owner != null
+				&& reference.Owner.Id.GetIdInt() != connector.Owner.Id.GetIdInt()) return reference;
+		}
+		return null;
+	}
+
+	private static bool IsConnectedTo(Connector first, Connector second)
+	{
+		if (first == null || second == null || !first.IsConnected) return false;
+		foreach (Connector reference in first.AllRefs)
+		{
+			if (reference != null && reference.Owner != null && second.Owner != null
+				&& reference.Owner.Id.GetIdInt() == second.Owner.Id.GetIdInt()
+				&& reference.Origin.DistanceTo(second.Origin) <= ConnectorToleranceFeet) return true;
+		}
+		return false;
+	}
+
+	private static double Clamp(double value, double min, double max)
+	{
+		return Math.Max(min, Math.Min(max, value));
+	}
+
+	private static string FormatPoint(XYZ point)
+	{
+		return "(" + Math.Round(point.X * 304.8) + ", " + Math.Round(point.Y * 304.8) + ", " + Math.Round(point.Z * 304.8) + " mm)";
+	}
+
+	private sealed class AvoidClashPipeSelectionFilter : ISelectionFilter
+	{
+		public bool AllowElement(Element element)
+		{
+			return element is Pipe || element?.Category?.Id.GetIdInt() == (int)BuiltInCategory.OST_PipeCurves;
 		}
 
-		double numer = d1343 * d4321 - d1321 * d4343;
-		double mua = numer / denom;
-		return p1 + dir1 * mua;
+		public bool AllowReference(Reference reference, XYZ position)
+		{
+			return true;
+		}
+	}
+
+	private sealed class AvoidClashObstacleSelectionFilter : ISelectionFilter
+	{
+		public bool AllowElement(Element element)
+		{
+			if (element?.Category == null) return false;
+			int categoryId = element.Category.Id.GetIdInt();
+			return categoryId == (int)BuiltInCategory.OST_StructuralFraming
+				|| categoryId == (int)BuiltInCategory.OST_DuctCurves
+				|| categoryId == (int)BuiltInCategory.OST_PipeCurves
+				|| categoryId == (int)BuiltInCategory.OST_CableTray
+				|| categoryId == (int)BuiltInCategory.OST_Walls
+				|| categoryId == (int)BuiltInCategory.OST_Floors;
+		}
+
+		public bool AllowReference(Reference reference, XYZ position)
+		{
+			return true;
+		}
 	}
 }
