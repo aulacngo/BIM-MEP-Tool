@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
+using Autodesk.Revit.DB.Mechanical;
 using Autodesk.Revit.DB.Plumbing;
 using Autodesk.Revit.UI;
 using Autodesk.Revit.UI.Selection;
@@ -20,132 +22,42 @@ public class PipeInsulationCmd : IExternalCommand
 
         try
         {
-            List<InsulationTypeItem> insulationTypes = GetPipeInsulationTypes(doc);
-            if (insulationTypes.Count == 0)
+            List<InsulationTypeItem> pipeInsulationTypes = GetPipeInsulationTypes(doc);
+            List<InsulationTypeItem> ductInsulationTypes = GetDuctInsulationTypes(doc);
+            if (pipeInsulationTypes.Count == 0 && ductInsulationTypes.Count == 0)
             {
-                TaskDialog.Show("BIM | Pipe Insulation", "Không tìm thấy Pipe Insulation Type nào trong dự án.\nVui lòng load Pipe Insulation Type trước khi sử dụng tool.");
+                TaskDialog.Show(
+                    "BIM | Pipe & Duct Insulation",
+                    "Không tìm thấy Pipe Insulation Type hoặc Duct Insulation Type nào trong dự án.\n" +
+                    "Vui lòng load ít nhất một insulation type trước khi sử dụng tool.");
                 return Result.Cancelled;
             }
 
-            PipeInsulationWindow ui = new PipeInsulationWindow(insulationTypes, GetSystemOptionsInActiveView(doc));
+            PipeInsulationWindow ui = new PipeInsulationWindow(
+                pipeInsulationTypes,
+                ductInsulationTypes,
+                GetPipeSystemOptionsInActiveView(doc),
+                GetDuctSystemOptionsInActiveView(doc));
             if (ui.ShowDialog() != true)
             {
                 return Result.Cancelled;
             }
 
-            ElementId insulationTypeId = ui.SelectedInsulationType.Tag as ElementId;
+            ElementId insulationTypeId = ui.SelectedInsulationType == null
+                ? null
+                : ui.SelectedInsulationType.Tag as ElementId;
             if (insulationTypeId == null)
             {
-                TaskDialog.Show("BIM | Pipe Insulation", "Insulation Type được chọn không hợp lệ.");
+                string targetLabel = ui.SelectedMepTarget == MepTargetKind.Duct ? "Duct" : "Pipe";
+                TaskDialog.Show(
+                    "BIM | Pipe & Duct Insulation",
+                    "Chưa chọn " + targetLabel + " Insulation Type hợp lệ. Vui lòng load type tương ứng vào dự án.");
                 return Result.Cancelled;
             }
 
-            List<Element> pipeElements;
-            List<Element> fittingElements;
-            Result selectionResult = GetTargetElements(uidoc, doc, ui, out pipeElements, out fittingElements);
-            if (selectionResult != Result.Succeeded)
-            {
-                return selectionResult;
-            }
-
-            List<Element> teeFittings = new List<Element>();
-            if (ui.SmoothTees)
-            {
-                teeFittings = fittingElements.Where(IsTeeOrBranchFitting).ToList();
-                fittingElements = fittingElements.Where(fitting => !IsTeeOrBranchFitting(fitting)).ToList();
-            }
-
-            List<PipeInsulationRule> systemRules = ui.Rules
-                .Where(rule => rule != null && rule.MinDN > 0 && rule.MaxDN >= rule.MinDN && rule.ThicknessMM > 0)
-                .ToList();
-            int insulatedCount = 0;
-            int skippedCount = 0;
-            int removedCount = 0;
-
-            using (Transaction transaction = new Transaction(doc, "BIN_PipeInsulation"))
-            {
-                bool transactionStarted = false;
-                try
-                {
-                    transaction.Start();
-                    transactionStarted = true;
-
-                    FailureHandlingOptions failureOptions = transaction.GetFailureHandlingOptions();
-                    failureOptions.SetClearAfterRollback(true);
-                    transaction.SetFailureHandlingOptions(failureOptions);
-
-                    if (teeFittings.Count > 0)
-                    {
-                        removedCount += RemoveExistingInsulation(doc, new List<Element>(), teeFittings);
-                    }
-
-                    if (ui.RemoveExisting)
-                    {
-                        removedCount += RemoveExistingInsulation(doc, pipeElements, fittingElements);
-                    }
-
-                    if (removedCount > 0)
-                    {
-                        doc.Regenerate();
-                    }
-
-                    foreach (Element element in pipeElements)
-                    {
-                        Pipe pipe = element as Pipe;
-                        double thicknessMm = pipe == null ? 0.0 : PipeInsulationRules.GetThicknessMm(pipe, systemRules);
-                        if (thicknessMm <= 0.0)
-                        {
-                            skippedCount++;
-                            continue;
-                        }
-
-                        try
-                        {
-                            PipeInsulation.Create(doc, element.Id, insulationTypeId, thicknessMm / 304.8);
-                            insulatedCount++;
-                        }
-                        catch
-                        {
-                            skippedCount++;
-                        }
-                    }
-
-                    foreach (Element fitting in fittingElements)
-                    {
-                        double fittingSize = GetFittingSize(fitting);
-                        double thicknessMm = PipeInsulationRules.GetFittingThicknessMm(fitting, fittingSize, systemRules);
-                        if (thicknessMm <= 0.0)
-                        {
-                            skippedCount++;
-                            continue;
-                        }
-
-                        try
-                        {
-                            PipeInsulation.Create(doc, fitting.Id, insulationTypeId, thicknessMm / 304.8);
-                            insulatedCount++;
-                        }
-                        catch
-                        {
-                            skippedCount++;
-                        }
-                    }
-
-                    transaction.Commit();
-                    transactionStarted = false;
-                }
-                catch
-                {
-                    if (transactionStarted)
-                    {
-                        transaction.RollBack();
-                    }
-                    throw;
-                }
-            }
-
-            ShowCompletionDialog(ui, pipeElements.Count, fittingElements.Count, insulatedCount, skippedCount, removedCount);
-            return Result.Succeeded;
+            return ui.SelectedMepTarget == MepTargetKind.Duct
+                ? ApplyDuctInsulation(uidoc, doc, ui, insulationTypeId)
+                : ApplyPipeInsulation(uidoc, doc, ui, insulationTypeId);
         }
         catch (Autodesk.Revit.Exceptions.OperationCanceledException)
         {
@@ -159,7 +71,240 @@ public class PipeInsulationCmd : IExternalCommand
         }
     }
 
-    private static List<PipeInsulationSystemOption> GetSystemOptionsInActiveView(Document doc)
+    private static Result ApplyPipeInsulation(
+        UIDocument uidoc,
+        Document doc,
+        PipeInsulationWindow ui,
+        ElementId insulationTypeId)
+    {
+        List<Element> pipeElements;
+        List<Element> fittingElements;
+        Result selectionResult = GetPipeTargetElements(uidoc, doc, ui, out pipeElements, out fittingElements);
+        if (selectionResult != Result.Succeeded)
+        {
+            return selectionResult;
+        }
+
+        List<Element> teeFittings = new List<Element>();
+        if (ui.SmoothTees)
+        {
+            teeFittings = fittingElements.Where(IsPipeTeeOrBranchFitting).ToList();
+            fittingElements = fittingElements.Where(fitting => !IsPipeTeeOrBranchFitting(fitting)).ToList();
+        }
+
+        List<PipeInsulationRule> systemRules = ui.Rules
+            .Where(rule => rule != null && rule.MinDN > 0 && rule.MaxDN >= rule.MinDN && rule.ThicknessMM > 0)
+            .ToList();
+        int insulatedCount = 0;
+        int skippedCount = 0;
+        int removedCount = 0;
+
+        using (Transaction transaction = new Transaction(doc, "BIN_PipeInsulation"))
+        {
+            bool transactionStarted = false;
+            try
+            {
+                transaction.Start();
+                transactionStarted = true;
+
+                FailureHandlingOptions failureOptions = transaction.GetFailureHandlingOptions();
+                failureOptions.SetClearAfterRollback(true);
+                transaction.SetFailureHandlingOptions(failureOptions);
+
+                // This is the original smooth-tee behavior: remove tee insulation so
+                // intersecting insulation solids do not create a square block at a tee.
+                if (teeFittings.Count > 0)
+                {
+                    removedCount += RemoveExistingPipeInsulation(doc, new List<Element>(), teeFittings);
+                }
+
+                if (ui.RemoveExisting)
+                {
+                    removedCount += RemoveExistingPipeInsulation(doc, pipeElements, fittingElements);
+                }
+
+                if (removedCount > 0)
+                {
+                    doc.Regenerate();
+                }
+
+                foreach (Element element in pipeElements)
+                {
+                    Pipe pipe = element as Pipe;
+                    double thicknessMm = pipe == null ? 0.0 : PipeInsulationRules.GetThicknessMm(pipe, systemRules);
+                    if (thicknessMm <= 0.0)
+                    {
+                        skippedCount++;
+                        continue;
+                    }
+
+                    try
+                    {
+                        PipeInsulation.Create(doc, element.Id, insulationTypeId, thicknessMm / 304.8);
+                        insulatedCount++;
+                    }
+                    catch
+                    {
+                        skippedCount++;
+                    }
+                }
+
+                foreach (Element fitting in fittingElements)
+                {
+                    double fittingSize = GetPipeFittingSize(fitting);
+                    double thicknessMm = PipeInsulationRules.GetFittingThicknessMm(fitting, fittingSize, systemRules);
+                    if (thicknessMm <= 0.0)
+                    {
+                        skippedCount++;
+                        continue;
+                    }
+
+                    try
+                    {
+                        PipeInsulation.Create(doc, fitting.Id, insulationTypeId, thicknessMm / 304.8);
+                        insulatedCount++;
+                    }
+                    catch
+                    {
+                        skippedCount++;
+                    }
+                }
+
+                transaction.Commit();
+                transactionStarted = false;
+            }
+            catch
+            {
+                if (transactionStarted)
+                {
+                    transaction.RollBack();
+                }
+                throw;
+            }
+        }
+
+        ShowCompletionDialog(ui, "ống nước", pipeElements.Count, fittingElements.Count, insulatedCount, skippedCount, removedCount);
+        return Result.Succeeded;
+    }
+
+    private static Result ApplyDuctInsulation(
+        UIDocument uidoc,
+        Document doc,
+        PipeInsulationWindow ui,
+        ElementId insulationTypeId)
+    {
+        List<Element> ductElements;
+        List<Element> fittingElements;
+        Result selectionResult = GetDuctTargetElements(uidoc, doc, ui, out ductElements, out fittingElements);
+        if (selectionResult != Result.Succeeded)
+        {
+            return selectionResult;
+        }
+
+        List<Element> teeFittings = new List<Element>();
+        if (ui.SmoothTees)
+        {
+            teeFittings = fittingElements.Where(IsDuctTeeOrBranchFitting).ToList();
+            fittingElements = fittingElements.Where(fitting => !IsDuctTeeOrBranchFitting(fitting)).ToList();
+        }
+
+        List<PipeInsulationRule> systemRules = ui.Rules
+            .Where(rule => rule != null && rule.MinDN >= 0 && rule.MaxDN >= rule.MinDN && rule.ThicknessMM > 0)
+            .ToList();
+        int insulatedCount = 0;
+        int skippedCount = 0;
+        int removedCount = 0;
+
+        using (Transaction transaction = new Transaction(doc, "BIN_DuctInsulation"))
+        {
+            bool transactionStarted = false;
+            try
+            {
+                transaction.Start();
+                transactionStarted = true;
+
+                FailureHandlingOptions failureOptions = transaction.GetFailureHandlingOptions();
+                failureOptions.SetClearAfterRollback(true);
+                transaction.SetFailureHandlingOptions(failureOptions);
+
+                if (teeFittings.Count > 0)
+                {
+                    removedCount += RemoveExistingDuctInsulation(doc, new List<Element>(), teeFittings);
+                }
+
+                if (ui.RemoveExisting)
+                {
+                    removedCount += RemoveExistingDuctInsulation(doc, ductElements, fittingElements);
+                }
+
+                if (removedCount > 0)
+                {
+                    doc.Regenerate();
+                }
+
+                foreach (Element element in ductElements)
+                {
+                    Duct duct = element as Duct;
+                    double ductSize = GetDuctSize(duct);
+                    double thicknessMm = duct == null
+                        ? 0.0
+                        : PipeInsulationRules.GetDuctThicknessMm(duct, ductSize, systemRules);
+                    if (thicknessMm <= 0.0)
+                    {
+                        skippedCount++;
+                        continue;
+                    }
+
+                    try
+                    {
+                        DuctInsulation.Create(doc, element.Id, insulationTypeId, thicknessMm / 304.8);
+                        insulatedCount++;
+                    }
+                    catch
+                    {
+                        skippedCount++;
+                    }
+                }
+
+                foreach (Element fitting in fittingElements)
+                {
+                    double fittingSize = GetDuctFittingSize(fitting);
+                    double thicknessMm = PipeInsulationRules.GetDuctFittingThicknessMm(fitting, fittingSize, systemRules);
+                    if (thicknessMm <= 0.0)
+                    {
+                        skippedCount++;
+                        continue;
+                    }
+
+                    try
+                    {
+                        DuctInsulation.Create(doc, fitting.Id, insulationTypeId, thicknessMm / 304.8);
+                        insulatedCount++;
+                    }
+                    catch
+                    {
+                        skippedCount++;
+                    }
+                }
+
+                transaction.Commit();
+                transactionStarted = false;
+            }
+            catch
+            {
+                if (transactionStarted)
+                {
+                    transaction.RollBack();
+                }
+                throw;
+            }
+        }
+
+        ShowCompletionDialog(ui, "ống gió", ductElements.Count, fittingElements.Count, insulatedCount, skippedCount, removedCount);
+        return Result.Succeeded;
+    }
+
+    private static List<PipeInsulationSystemOption> GetPipeSystemOptionsInActiveView(Document doc)
     {
         return new FilteredElementCollector(doc, doc.ActiveView.Id)
             .OfCategory(BuiltInCategory.OST_PipeCurves)
@@ -177,31 +322,60 @@ public class PipeInsulationCmd : IExternalCommand
             .ToList();
     }
 
+    private static List<PipeInsulationSystemOption> GetDuctSystemOptionsInActiveView(Document doc)
+    {
+        List<string> systemNames = new List<string>();
+        foreach (Element element in CollectElementsInActiveView(doc, BuiltInCategory.OST_DuctCurves))
+        {
+            Duct duct = element as Duct;
+            if (duct != null)
+            {
+                systemNames.Add(PipeInsulationRules.DuctSystemName(duct));
+            }
+        }
+
+        foreach (Element fitting in CollectElementsInActiveView(doc, BuiltInCategory.OST_DuctFitting))
+        {
+            systemNames.Add(PipeInsulationRules.DuctFittingSystemName(fitting));
+        }
+
+        return systemNames
+            .Where(systemName => !string.IsNullOrWhiteSpace(systemName))
+            .GroupBy(systemName => systemName, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new PipeInsulationSystemOption
+            {
+                SystemName = group.First(),
+                PipeCount = group.Count()
+            })
+            .OrderBy(option => option.SystemName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     private static void ShowCompletionDialog(
         PipeInsulationWindow ui,
-        int pipeCount,
+        string hostLabel,
+        int hostCount,
         int fittingCount,
         int insulatedCount,
         int skippedCount,
         int removedCount)
     {
-        TaskDialog dialog = new TaskDialog("BIM | Pipe Insulation")
+        TaskDialog dialog = new TaskDialog("BIM | Pipe & Duct Insulation")
         {
             MainInstruction = "Đã hoàn thành áp dụng insulation",
-            MainContent = "Đã bọc insulation: " + insulatedCount + " phần tử\n" +
-                          "Bỏ qua: " + skippedCount + " phần tử",
+            MainContent = "Đã bọc insulation cho " + hostCount + " " + hostLabel + ", " + fittingCount + " fitting.\n" +
+                          "Tạo mới: " + insulatedCount + " phần tử; bỏ qua: " + skippedCount + " phần tử.",
             ExpandedContent = "Phạm vi: " + ScopeDescription(ui) + "\n" +
-                              "Preset: " + ui.SelectedPresetName + "\n" +
-                              "Đối tượng trong phạm vi: " + pipeCount + " ống, " + fittingCount + " fitting" +
+                              "Preset: " + ui.SelectedPresetName +
                               ((ui.RemoveExisting || removedCount > 0) ? "\nĐã xóa insulation cũ: " + removedCount : string.Empty) +
-                              (ui.SmoothTees ? "\nChế độ làm mượt ngã ba chữ T: ĐÃ BẬT (không tạo khối vuông ở Tê)" : string.Empty),
+                              (ui.SmoothTees ? "\nChế độ làm mượt ngã ba chữ T: ĐÃ BẬT." : string.Empty),
             MainIcon = TaskDialogIcon.TaskDialogIconInformation,
             CommonButtons = TaskDialogCommonButtons.Ok
         };
         dialog.Show();
     }
 
-    private static Result GetTargetElements(
+    private static Result GetPipeTargetElements(
         UIDocument uidoc,
         Document doc,
         PipeInsulationWindow ui,
@@ -218,53 +392,82 @@ public class PipeInsulationCmd : IExternalCommand
         }
         else if (ui.SelectedScope == PipeInsulationScope.SelectedPipes)
         {
-            AddSelectedTargets(doc, uidoc.Selection.GetElementIds(), pipeElements, fittingElements);
+            AddSelectedPipeTargets(doc, uidoc.Selection.GetElementIds(), pipeElements, fittingElements);
             if (pipeElements.Count == 0 && fittingElements.Count == 0)
             {
                 IList<Reference> pickedReferences = uidoc.Selection.PickObjects(
                     ObjectType.Element,
                     new PipeOrFittingSelectionFilter(),
                     "Chọn Pipe hoặc Pipe Fitting để bọc insulation");
-                AddSelectedTargets(doc, pickedReferences.Select(reference => reference.ElementId), pipeElements, fittingElements);
+                AddSelectedPipeTargets(doc, pickedReferences.Select(reference => reference.ElementId), pipeElements, fittingElements);
             }
         }
         else
         {
-            foreach (Element pipe in CollectElementsInActiveView(doc, BuiltInCategory.OST_PipeCurves))
-            {
-                Pipe typedPipe = pipe as Pipe;
-                if (typedPipe != null && string.Equals(
-                    PipeInsulationRules.SystemName(typedPipe),
-                    ui.SelectedSystemType,
-                    StringComparison.OrdinalIgnoreCase))
+            pipeElements = CollectElementsInActiveView(doc, BuiltInCategory.OST_PipeCurves)
+                .Where(element =>
                 {
-                    pipeElements.Add(pipe);
-                }
-            }
-
-            foreach (Element fitting in CollectElementsInActiveView(doc, BuiltInCategory.OST_PipeFitting))
-            {
-                if (string.Equals(
-                    PipeInsulationRules.FittingSystemName(fitting),
-                    ui.SelectedSystemType,
-                    StringComparison.OrdinalIgnoreCase))
-                {
-                    fittingElements.Add(fitting);
-                }
-            }
-
-            if (pipeElements.Count == 0 && fittingElements.Count == 0)
-            {
-                TaskDialog.Show(
-                    "BIM | Pipe Insulation",
-                    "Không có Pipe hoặc Pipe Fitting thuộc System Type '" + ui.SelectedSystemType + "' trong view hiện tại.");
-                return Result.Cancelled;
-            }
+                    Pipe pipe = element as Pipe;
+                    return pipe != null && string.Equals(PipeInsulationRules.SystemName(pipe), ui.SelectedSystemType, StringComparison.OrdinalIgnoreCase);
+                })
+                .ToList();
+            fittingElements = CollectElementsInActiveView(doc, BuiltInCategory.OST_PipeFitting)
+                .Where(element => string.Equals(PipeInsulationRules.FittingSystemName(element), ui.SelectedSystemType, StringComparison.OrdinalIgnoreCase))
+                .ToList();
         }
 
-        if (pipeElements.Count == 0 && fittingElements.Count == 0)
+        return ValidateTargetElements(pipeElements, fittingElements, "Pipe hoặc Pipe Fitting");
+    }
+
+    private static Result GetDuctTargetElements(
+        UIDocument uidoc,
+        Document doc,
+        PipeInsulationWindow ui,
+        out List<Element> ductElements,
+        out List<Element> fittingElements)
+    {
+        ductElements = new List<Element>();
+        fittingElements = new List<Element>();
+
+        if (ui.SelectedScope == PipeInsulationScope.AllInView)
         {
-            TaskDialog.Show("BIM | Pipe Insulation", "Không có Pipe hoặc Pipe Fitting nào trong phạm vi đã chọn.");
+            ductElements = CollectElementsInActiveView(doc, BuiltInCategory.OST_DuctCurves);
+            fittingElements = CollectElementsInActiveView(doc, BuiltInCategory.OST_DuctFitting);
+        }
+        else if (ui.SelectedScope == PipeInsulationScope.SelectedPipes)
+        {
+            AddSelectedDuctTargets(doc, uidoc.Selection.GetElementIds(), ductElements, fittingElements);
+            if (ductElements.Count == 0 && fittingElements.Count == 0)
+            {
+                IList<Reference> pickedReferences = uidoc.Selection.PickObjects(
+                    ObjectType.Element,
+                    new DuctOrFittingSelectionFilter(),
+                    "Chọn Duct hoặc Duct Fitting để bọc insulation");
+                AddSelectedDuctTargets(doc, pickedReferences.Select(reference => reference.ElementId), ductElements, fittingElements);
+            }
+        }
+        else
+        {
+            ductElements = CollectElementsInActiveView(doc, BuiltInCategory.OST_DuctCurves)
+                .Where(element =>
+                {
+                    Duct duct = element as Duct;
+                    return duct != null && string.Equals(PipeInsulationRules.DuctSystemName(duct), ui.SelectedSystemType, StringComparison.OrdinalIgnoreCase);
+                })
+                .ToList();
+            fittingElements = CollectElementsInActiveView(doc, BuiltInCategory.OST_DuctFitting)
+                .Where(element => string.Equals(PipeInsulationRules.DuctFittingSystemName(element), ui.SelectedSystemType, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        return ValidateTargetElements(ductElements, fittingElements, "Duct hoặc Duct Fitting");
+    }
+
+    private static Result ValidateTargetElements(List<Element> hostElements, List<Element> fittingElements, string targetLabel)
+    {
+        if (hostElements.Count == 0 && fittingElements.Count == 0)
+        {
+            TaskDialog.Show("BIM | Pipe & Duct Insulation", "Không có " + targetLabel + " nào trong phạm vi đã chọn.");
             return Result.Cancelled;
         }
 
@@ -280,7 +483,7 @@ public class PipeInsulationCmd : IExternalCommand
             .ToList();
     }
 
-    private static void AddSelectedTargets(
+    private static void AddSelectedPipeTargets(
         Document doc,
         IEnumerable<ElementId> selectedIds,
         ICollection<Element> pipeElements,
@@ -300,13 +503,49 @@ public class PipeInsulationCmd : IExternalCommand
         }
     }
 
+    private static void AddSelectedDuctTargets(
+        Document doc,
+        IEnumerable<ElementId> selectedIds,
+        ICollection<Element> ductElements,
+        ICollection<Element> fittingElements)
+    {
+        foreach (ElementId selectedId in selectedIds)
+        {
+            Element element = doc.GetElement(selectedId);
+            if (element is Duct)
+            {
+                ductElements.Add(element);
+            }
+            else if (IsDuctFitting(element))
+            {
+                fittingElements.Add(element);
+            }
+        }
+    }
+
     private static bool IsPipeFitting(Element element)
     {
         return element != null && element.Category != null &&
                element.Category.Id.Equals(new ElementId((int)BuiltInCategory.OST_PipeFitting));
     }
 
-    private static bool IsTeeOrBranchFitting(Element fitting)
+    private static bool IsDuctFitting(Element element)
+    {
+        return element != null && element.Category != null &&
+               element.Category.Id.Equals(new ElementId((int)BuiltInCategory.OST_DuctFitting));
+    }
+
+    private static bool IsPipeTeeOrBranchFitting(Element fitting)
+    {
+        return IsTeeOrBranchFitting(fitting, Domain.DomainPiping);
+    }
+
+    private static bool IsDuctTeeOrBranchFitting(Element fitting)
+    {
+        return IsTeeOrBranchFitting(fitting, Domain.DomainHvac);
+    }
+
+    private static bool IsTeeOrBranchFitting(Element fitting, Domain expectedDomain)
     {
         FamilyInstance familyInstance = fitting as FamilyInstance;
         if (familyInstance == null)
@@ -314,7 +553,9 @@ public class PipeInsulationCmd : IExternalCommand
             return false;
         }
 
-        Parameter partTypeParam = familyInstance.Symbol?.Family?.get_Parameter(BuiltInParameter.FAMILY_CONTENT_PART_TYPE);
+        Parameter partTypeParam = familyInstance.Symbol == null || familyInstance.Symbol.Family == null
+            ? null
+            : familyInstance.Symbol.Family.get_Parameter(BuiltInParameter.FAMILY_CONTENT_PART_TYPE);
         if (partTypeParam != null)
         {
             int partTypeValue = partTypeParam.AsInteger();
@@ -324,35 +565,39 @@ public class PipeInsulationCmd : IExternalCommand
             }
         }
 
-        if (familyInstance.MEPModel?.ConnectorManager?.Connectors != null)
+        ConnectorManager connectorManager = familyInstance.MEPModel == null ? null : familyInstance.MEPModel.ConnectorManager;
+        if (connectorManager != null)
         {
-            int pipeConnectorCount = 0;
-            foreach (Connector connector in familyInstance.MEPModel.ConnectorManager.Connectors)
+            int connectorCount = 0;
+            foreach (Connector connector in connectorManager.Connectors)
             {
-                if (connector.Domain == Domain.DomainPiping)
+                if (connector.Domain == expectedDomain)
                 {
-                    pipeConnectorCount++;
+                    connectorCount++;
                 }
             }
 
-            if (pipeConnectorCount >= 3)
+            if (connectorCount >= 3)
             {
                 return true;
             }
         }
 
-        string name = ((familyInstance.Name ?? string.Empty) + " " + (familyInstance.Symbol?.Family?.Name ?? string.Empty)).ToLowerInvariant();
-        return name.Contains("tee") || name.Contains("tê") || name.Contains("cross");
+        string name = ((familyInstance.Name ?? string.Empty) + " " +
+                       (familyInstance.Symbol == null || familyInstance.Symbol.Family == null ? string.Empty : familyInstance.Symbol.Family.Name ?? string.Empty))
+            .ToLowerInvariant();
+        return name.Contains("tee") || name.Contains("tê") || name.Contains("cross") || name.Contains("chạc");
     }
 
     private static string ScopeDescription(PipeInsulationWindow ui)
     {
+        string objectLabel = ui.SelectedMepTarget == MepTargetKind.Duct ? "ống gió" : "đường ống";
         switch (ui.SelectedScope)
         {
             case PipeInsulationScope.AllInView:
-                return "Tất cả đường ống trong View";
+                return "Tất cả " + objectLabel + " trong View";
             case PipeInsulationScope.SelectedPipes:
-                return "Đường ống đang chọn";
+                return objectLabel + " đang chọn";
             default:
                 return "Theo System Type: " + ui.SelectedSystemType;
         }
@@ -365,12 +610,30 @@ public class PipeInsulationCmd : IExternalCommand
             .OfCategory(BuiltInCategory.OST_PipeInsulations)
             .WhereElementIsElementType())
         {
-            result.Add(new InsulationTypeItem { Name = element.Name, Tag = element.Id });
+            if (element is PipeInsulationType)
+            {
+                result.Add(new InsulationTypeItem { Name = element.Name, Tag = element.Id });
+            }
         }
         return result.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    private static double GetFittingSize(Element fitting)
+    private static List<InsulationTypeItem> GetDuctInsulationTypes(Document doc)
+    {
+        List<InsulationTypeItem> result = new List<InsulationTypeItem>();
+        foreach (Element element in new FilteredElementCollector(doc)
+            .OfCategory(BuiltInCategory.OST_DuctInsulations)
+            .WhereElementIsElementType())
+        {
+            if (element is DuctInsulationType)
+            {
+                result.Add(new InsulationTypeItem { Name = element.Name, Tag = element.Id });
+            }
+        }
+        return result.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static double GetPipeFittingSize(Element fitting)
     {
         FamilyInstance familyInstance = fitting as FamilyInstance;
         ConnectorManager connectorManager = familyInstance == null || familyInstance.MEPModel == null
@@ -381,7 +644,7 @@ public class PipeInsulationCmd : IExternalCommand
             double maxSize = 0.0;
             foreach (Connector connector in connectorManager.Connectors)
             {
-                if ((int)connector.Shape == 0)
+                if (connector.Domain == Domain.DomainPiping && connector.Shape == ConnectorProfileType.Round)
                 {
                     double diameter = connector.Radius * 2.0;
                     if (diameter > maxSize)
@@ -402,35 +665,133 @@ public class PipeInsulationCmd : IExternalCommand
             return nominalDiameter.AsDouble();
         }
 
-        Parameter size = fitting.LookupParameter("Size");
-        string sizeText = size == null ? null : size.AsString();
-        if (!string.IsNullOrEmpty(sizeText))
+        return ReadLargestSizeFromText(fitting, "Size");
+    }
+
+    private static double GetDuctSize(Duct duct)
+    {
+        if (duct == null)
         {
-            string number = Regex.Replace(sizeText, "[^\\d.]", string.Empty);
-            double sizeMm;
-            if (double.TryParse(number, out sizeMm))
+            return 0.0;
+        }
+
+        double diameter = ReadDoubleParameter(duct, BuiltInParameter.RBS_CURVE_DIAMETER_PARAM);
+        if (diameter > 0.0)
+        {
+            return diameter;
+        }
+
+        double width = ReadDoubleParameter(duct, BuiltInParameter.RBS_CURVE_WIDTH_PARAM);
+        double height = ReadDoubleParameter(duct, BuiltInParameter.RBS_CURVE_HEIGHT_PARAM);
+        return Math.Max(width, height);
+    }
+
+    private static double GetDuctFittingSize(Element fitting)
+    {
+        FamilyInstance familyInstance = fitting as FamilyInstance;
+        ConnectorManager connectorManager = familyInstance == null || familyInstance.MEPModel == null
+            ? null
+            : familyInstance.MEPModel.ConnectorManager;
+        if (connectorManager != null)
+        {
+            double maxSize = 0.0;
+            foreach (Connector connector in connectorManager.Connectors)
             {
-                return sizeMm / 304.8;
+                if (connector.Domain != Domain.DomainHvac)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    double connectorSize = connector.Shape == ConnectorProfileType.Round
+                        ? connector.Radius * 2.0
+                        : Math.Max(connector.Width, connector.Height);
+                    if (connectorSize > maxSize)
+                    {
+                        maxSize = connectorSize;
+                    }
+                }
+                catch
+                {
+                    // Try the next connector, then fall back to its displayed size.
+                }
+            }
+            if (maxSize > 0.0)
+            {
+                return maxSize;
             }
         }
 
-        return 0.0;
+        double size = ReadLargestSizeFromText(fitting, "Duct Size");
+        return size > 0.0 ? size : ReadLargestSizeFromText(fitting, "Size");
     }
 
-    private static int RemoveExistingInsulation(Document doc, IEnumerable<Element> pipes, IEnumerable<Element> fittings)
+    private static double ReadDoubleParameter(Element element, BuiltInParameter parameterId)
     {
-        HashSet<ElementId> targetIds = new HashSet<ElementId>(pipes.Select(pipe => pipe.Id));
+        Parameter parameter = element == null ? null : element.get_Parameter(parameterId);
+        return parameter != null && parameter.StorageType == StorageType.Double ? parameter.AsDouble() : 0.0;
+    }
+
+    private static double ReadLargestSizeFromText(Element element, string parameterName)
+    {
+        Parameter parameter = element == null ? null : element.LookupParameter(parameterName);
+        if (parameter != null && parameter.StorageType == StorageType.Double)
+        {
+            return parameter.AsDouble();
+        }
+
+        string text = parameter == null ? null : parameter.AsValueString() ?? parameter.AsString();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return 0.0;
+        }
+
+        double largestMm = 0.0;
+        foreach (Match match in Regex.Matches(text, "[0-9]+(?:[.,][0-9]+)?"))
+        {
+            double sizeMm;
+            if (double.TryParse(
+                match.Value.Replace(',', '.'),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out sizeMm))
+            {
+                largestMm = Math.Max(largestMm, sizeMm);
+            }
+        }
+
+        return largestMm / 304.8;
+    }
+
+    private static int RemoveExistingPipeInsulation(Document doc, IEnumerable<Element> pipes, IEnumerable<Element> fittings)
+    {
+        return RemoveExistingInsulation(doc, BuiltInCategory.OST_PipeInsulations, pipes, fittings);
+    }
+
+    private static int RemoveExistingDuctInsulation(Document doc, IEnumerable<Element> ducts, IEnumerable<Element> fittings)
+    {
+        return RemoveExistingInsulation(doc, BuiltInCategory.OST_DuctInsulations, ducts, fittings);
+    }
+
+    private static int RemoveExistingInsulation(
+        Document doc,
+        BuiltInCategory insulationCategory,
+        IEnumerable<Element> hosts,
+        IEnumerable<Element> fittings)
+    {
+        HashSet<ElementId> targetIds = new HashSet<ElementId>(hosts.Select(host => host.Id));
         targetIds.UnionWith(fittings.Select(fitting => fitting.Id));
         List<ElementId> insulationIds = new List<ElementId>();
 
         foreach (Element element in new FilteredElementCollector(doc)
-            .OfCategory(BuiltInCategory.OST_PipeInsulations)
+            .OfCategory(insulationCategory)
             .WhereElementIsNotElementType())
         {
-            PipeInsulation insulation = element as PipeInsulation;
-            if (insulation != null && targetIds.Contains(insulation.HostElementId))
+            ElementId hostId = GetInsulationHostId(element);
+            if (hostId != null && targetIds.Contains(hostId))
             {
-                insulationIds.Add(insulation.Id);
+                insulationIds.Add(element.Id);
             }
         }
 
@@ -450,11 +811,36 @@ public class PipeInsulationCmd : IExternalCommand
         return removedCount;
     }
 
+    private static ElementId GetInsulationHostId(Element insulation)
+    {
+        PipeInsulation pipeInsulation = insulation as PipeInsulation;
+        if (pipeInsulation != null)
+        {
+            return pipeInsulation.HostElementId;
+        }
+
+        DuctInsulation ductInsulation = insulation as DuctInsulation;
+        return ductInsulation == null ? null : ductInsulation.HostElementId;
+    }
+
     private sealed class PipeOrFittingSelectionFilter : ISelectionFilter
     {
         public bool AllowElement(Element element)
         {
             return element is Pipe || IsPipeFitting(element);
+        }
+
+        public bool AllowReference(Reference reference, XYZ position)
+        {
+            return false;
+        }
+    }
+
+    private sealed class DuctOrFittingSelectionFilter : ISelectionFilter
+    {
+        public bool AllowElement(Element element)
+        {
+            return element is Duct || IsDuctFitting(element);
         }
 
         public bool AllowReference(Reference reference, XYZ position)

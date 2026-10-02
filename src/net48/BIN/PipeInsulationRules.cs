@@ -2,9 +2,17 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
+using Autodesk.Revit.DB.Mechanical;
 using Autodesk.Revit.DB.Plumbing;
 
 namespace BIN;
+
+/// <summary>The MEP host family to which the insulation rules apply.</summary>
+public enum MepTargetKind
+{
+    Pipe = 0,
+    Duct = 1
+}
 
 public sealed class PipeInsulationRule
 {
@@ -20,10 +28,13 @@ public static class PipeInsulationRules
     public const string CondensateC1PresetKey = "condensate-c1";
     public const string HotWaterPresetKey = "hot-water";
     public const string AllC1PresetKey = "all-c1";
+    public const string SupplyAirPresetKey = "supply-air";
+    public const string ReturnAirPresetKey = "return-air";
+    public const string SmokeExhaustPresetKey = "smoke-exhaust";
+    public const string AllDuctsPresetKey = "all-ducts";
     public const string UserCustomPresetKey = "user-custom";
 
-    // DN 10000 is the editable representation of "DN200+". It covers practical
-    // project pipe sizes without requiring a special value in the rule grid.
+    // DN 10000 is the editable representation of an open-ended final range.
     private const double OpenEndedDn = 10000.0;
 
     public static List<PipeInsulationRule> DefaultChillerC1()
@@ -63,6 +74,43 @@ public static class PipeInsulationRules
         return rules;
     }
 
+    /// <summary>Supply air: 0-300 = 25 mm, 301-800 = 32 mm, 801+ = 40 mm.</summary>
+    public static List<PipeInsulationRule> DefaultSupplyAir()
+    {
+        return new List<PipeInsulationRule>
+        {
+            new PipeInsulationRule { System = "SA/SUPPLY AIR/SUPPLY/GIO CAP/GI\u00D3 C\u1EA4P", MinDN = 0, MaxDN = 300, ThicknessMM = 25 },
+            new PipeInsulationRule { System = "SA/SUPPLY AIR/SUPPLY/GIO CAP/GI\u00D3 C\u1EA4P", MinDN = 301, MaxDN = 800, ThicknessMM = 32 },
+            new PipeInsulationRule { System = "SA/SUPPLY AIR/SUPPLY/GIO CAP/GI\u00D3 C\u1EA4P", MinDN = 801, MaxDN = OpenEndedDn, ThicknessMM = 40 }
+        };
+    }
+
+    /// <summary>Return air: 25 mm for all practical project sizes.</summary>
+    public static List<PipeInsulationRule> DefaultReturnAir()
+    {
+        return new List<PipeInsulationRule>
+        {
+            new PipeInsulationRule { System = "RA/RETURN AIR/RETURN/GIO HOI/GI\u00D3 H\u1ED2I", MinDN = 0, MaxDN = OpenEndedDn, ThicknessMM = 25 }
+        };
+    }
+
+    /// <summary>Smoke exhaust: 50 mm EI board for all practical project sizes.</summary>
+    public static List<PipeInsulationRule> DefaultSmokeExhaust()
+    {
+        return new List<PipeInsulationRule>
+        {
+            new PipeInsulationRule { System = "SE/SMOKE EXHAUST/SMOKE/EXHAUST/HUT KHOI/H\u00DAT KH\u00D3I", MinDN = 0, MaxDN = OpenEndedDn, ThicknessMM = 50 }
+        };
+    }
+
+    public static List<PipeInsulationRule> DefaultAllDucts()
+    {
+        List<PipeInsulationRule> rules = DefaultSupplyAir();
+        rules.AddRange(DefaultReturnAir());
+        rules.AddRange(DefaultSmokeExhaust());
+        return rules;
+    }
+
     // Kept for callers and existing user settings created before the preset UI.
     public static List<PipeInsulationRule> DefaultC1()
     {
@@ -71,6 +119,31 @@ public static class PipeInsulationRules
 
     public static List<PipeInsulationRule> DefaultForPreset(string presetKey)
     {
+        return DefaultForPreset(MepTargetKind.Pipe, presetKey);
+    }
+
+    public static List<PipeInsulationRule> DefaultForPreset(MepTargetKind targetKind, string presetKey)
+    {
+        if (targetKind == MepTargetKind.Duct)
+        {
+            if (string.Equals(presetKey, SupplyAirPresetKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return DefaultSupplyAir();
+            }
+
+            if (string.Equals(presetKey, ReturnAirPresetKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return DefaultReturnAir();
+            }
+
+            if (string.Equals(presetKey, SmokeExhaustPresetKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return DefaultSmokeExhaust();
+            }
+
+            return DefaultAllDucts();
+        }
+
         if (string.Equals(presetKey, ChillerC1PresetKey, StringComparison.OrdinalIgnoreCase))
         {
             return DefaultChillerC1();
@@ -91,6 +164,31 @@ public static class PipeInsulationRules
 
     public static string SuggestedPresetKey(string systemName)
     {
+        return SuggestedPresetKey(MepTargetKind.Pipe, systemName);
+    }
+
+    public static string SuggestedPresetKey(MepTargetKind targetKind, string systemName)
+    {
+        if (targetKind == MepTargetKind.Duct)
+        {
+            if (Matches(systemName, "SA/SUPPLY AIR/SUPPLY/GIO CAP/GI\u00D3 C\u1EA4P"))
+            {
+                return SupplyAirPresetKey;
+            }
+
+            if (Matches(systemName, "RA/RETURN AIR/RETURN/GIO HOI/GI\u00D3 H\u1ED2I"))
+            {
+                return ReturnAirPresetKey;
+            }
+
+            if (Matches(systemName, "SE/SMOKE EXHAUST/SMOKE/EXHAUST/HUT KHOI/H\u00DAT KH\u00D3I"))
+            {
+                return SmokeExhaustPresetKey;
+            }
+
+            return null;
+        }
+
         if (Matches(systemName, "CHWS/CHWR/CHILLER/CHILLED WATER"))
         {
             return ChillerC1PresetKey;
@@ -124,11 +222,20 @@ public static class PipeInsulationRules
         return GetThicknessMm(FittingSystemName(fitting), fittingSizeFt * 304.8, rules);
     }
 
+    public static double GetDuctThicknessMm(Duct duct, double ductSizeFt, IEnumerable<PipeInsulationRule> rules)
+    {
+        return GetThicknessMm(DuctSystemName(duct), ductSizeFt * 304.8, rules);
+    }
+
+    public static double GetDuctFittingThicknessMm(Element fitting, double fittingSizeFt, IEnumerable<PipeInsulationRule> rules)
+    {
+        return GetThicknessMm(DuctFittingSystemName(fitting), fittingSizeFt * 304.8, rules);
+    }
+
     /// <summary>
     /// Matches a Revit system name against one or more rule alternatives. Besides
     /// comma/slash/semicolon alternatives, common MEP aliases are treated as the
-    /// same system family: CHWS/CHWR/Chilled Water, CDP/Condensate/Drain, and
-    /// DHW/Hot Water. This keeps factory presets useful with project-specific names.
+    /// same system family so project-specific system names remain usable.
     /// </summary>
     public static bool Matches(string actual, string pattern)
     {
@@ -168,12 +275,12 @@ public static class PipeInsulationRules
 
     public static string SystemName(Pipe pipe)
     {
-        return SystemNameFromParameter(pipe, pipe == null ? null : pipe.Document);
+        return SystemNameFromParameter(pipe, pipe == null ? null : pipe.Document, BuiltInParameter.RBS_PIPING_SYSTEM_TYPE_PARAM);
     }
 
     public static string FittingSystemName(Element fitting)
     {
-        string systemName = SystemNameFromParameter(fitting, fitting == null ? null : fitting.Document);
+        string systemName = SystemNameFromParameter(fitting, fitting == null ? null : fitting.Document, BuiltInParameter.RBS_PIPING_SYSTEM_TYPE_PARAM);
         if (!string.Equals(systemName, "Other", StringComparison.OrdinalIgnoreCase))
         {
             return systemName;
@@ -201,11 +308,49 @@ public static class PipeInsulationRules
         return systemName;
     }
 
+    public static string DuctSystemName(Duct duct)
+    {
+        return SystemNameFromParameter(duct, duct == null ? null : duct.Document, BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM);
+    }
+
+    public static string DuctFittingSystemName(Element fitting)
+    {
+        string systemName = SystemNameFromParameter(fitting, fitting == null ? null : fitting.Document, BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM);
+        if (!string.Equals(systemName, "Other", StringComparison.OrdinalIgnoreCase))
+        {
+            return systemName;
+        }
+
+        FamilyInstance familyInstance = fitting as FamilyInstance;
+        ConnectorManager connectorManager = familyInstance == null || familyInstance.MEPModel == null
+            ? null
+            : familyInstance.MEPModel.ConnectorManager;
+        if (connectorManager != null)
+        {
+            foreach (Connector connector in connectorManager.Connectors)
+            {
+                foreach (Connector referencedConnector in connector.AllRefs)
+                {
+                    Duct connectedDuct = referencedConnector.Owner as Duct;
+                    if (connectedDuct != null)
+                    {
+                        return DuctSystemName(connectedDuct);
+                    }
+                }
+            }
+        }
+
+        return systemName;
+    }
+
     private static readonly string[][] SystemAliasGroups =
     {
         new[] { "CHWS", "CHWR", "CHW", "CHILLER", "CHILLED WATER", "CHILLED" },
         new[] { "CDP", "CONDENSATE", "CONDENSATION", "DRAIN", "DRAINAGE" },
-        new[] { "DHW", "HOT WATER", "HOTWATER" }
+        new[] { "DHW", "HOT WATER", "HOTWATER" },
+        new[] { "SA", "SUPPLY", "SUPPLY AIR", "GIO CAP", "GI\u00D3 C\u1EA4P" },
+        new[] { "RA", "RETURN", "RETURN AIR", "GIO HOI", "GI\u00D3 H\u1ED2I" },
+        new[] { "SE", "SMOKE", "SMOKE EXHAUST", "EXHAUST", "HUT KHOI", "H\u00DAT KH\u00D3I" }
     };
 
     private static IEnumerable<string> SplitAlternatives(string value)
@@ -254,9 +399,9 @@ public static class PipeInsulationRules
             .ToArray());
     }
 
-    private static double GetThicknessMm(string systemName, double diameterMm, IEnumerable<PipeInsulationRule> rules)
+    private static double GetThicknessMm(string systemName, double sizeMm, IEnumerable<PipeInsulationRule> rules)
     {
-        if (diameterMm <= 0.0 || rules == null)
+        if (sizeMm <= 0.0 || rules == null)
         {
             return 0.0;
         }
@@ -266,7 +411,7 @@ public static class PipeInsulationRules
         // A named system rule always wins over an ALL/OTHER fallback rule.
         foreach (PipeInsulationRule rule in candidates)
         {
-            if (IsUsableForDiameter(rule, diameterMm) && !IsFallbackPattern(rule.System) && Matches(systemName, rule.System))
+            if (IsUsableForSize(rule, sizeMm) && !IsFallbackPattern(rule.System) && Matches(systemName, rule.System))
             {
                 return rule.ThicknessMM;
             }
@@ -274,7 +419,7 @@ public static class PipeInsulationRules
 
         foreach (PipeInsulationRule rule in candidates)
         {
-            if (IsUsableForDiameter(rule, diameterMm) && IsFallbackPattern(rule.System) && Matches(systemName, rule.System))
+            if (IsUsableForSize(rule, sizeMm) && IsFallbackPattern(rule.System) && Matches(systemName, rule.System))
             {
                 return rule.ThicknessMM;
             }
@@ -283,10 +428,10 @@ public static class PipeInsulationRules
         return 0.0;
     }
 
-    private static bool IsUsableForDiameter(PipeInsulationRule rule, double diameterMm)
+    private static bool IsUsableForSize(PipeInsulationRule rule, double sizeMm)
     {
         return rule != null && rule.ThicknessMM > 0.0 &&
-               diameterMm >= rule.MinDN - 0.1 && diameterMm <= rule.MaxDN + 0.1;
+               sizeMm >= rule.MinDN - 0.1 && sizeMm <= rule.MaxDN + 0.1;
     }
 
     private static bool IsFallbackPattern(string pattern)
@@ -296,14 +441,14 @@ public static class PipeInsulationRules
                normalized.Equals("OTHER", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string SystemNameFromParameter(Element element, Document document)
+    private static string SystemNameFromParameter(Element element, Document document, BuiltInParameter systemTypeParameter)
     {
         if (element == null)
         {
             return "Other";
         }
 
-        Parameter parameter = element.get_Parameter(BuiltInParameter.RBS_PIPING_SYSTEM_TYPE_PARAM);
+        Parameter parameter = element.get_Parameter(systemTypeParameter);
         if (parameter != null && parameter.StorageType == StorageType.ElementId)
         {
             Element systemType = document == null ? null : document.GetElement(parameter.AsElementId());

@@ -53,11 +53,14 @@ public sealed class PipeInsulationWindow : Window
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "BIN_PipeInsulation");
     private static readonly string PresetFileName = Path.Combine(SettingsDirectory, "presets.json");
+    private static readonly string DuctPresetFileName = Path.Combine(SettingsDirectory, "duct-presets.json");
     private static readonly string LegacyRulesFileName = Path.Combine(SettingsDirectory, "system_rules.json");
 
     private readonly ComboBox insulationTypeComboBox;
     private readonly ComboBox systemTypeComboBox;
     private readonly ComboBox presetComboBox;
+    private readonly RadioButton pipeModeRadioButton;
+    private readonly RadioButton ductModeRadioButton;
     private readonly CheckBox removeExistingCheckBox;
     private readonly CheckBox smoothTeesCheckBox;
     private readonly RadioButton allInViewRadioButton;
@@ -65,9 +68,16 @@ public sealed class PipeInsulationWindow : Window
     private readonly RadioButton bySystemTypeRadioButton;
     private readonly DataGrid rulesGrid;
     private readonly TextBlock presetStatusText;
-    private readonly List<PipeInsulationPresetItem> presetItems;
+    private DataGridTextColumn minSizeColumn;
+    private DataGridTextColumn maxSizeColumn;
+    private List<PipeInsulationPresetItem> presetItems;
+    private readonly List<InsulationTypeItem> pipeInsulationTypes;
+    private readonly List<InsulationTypeItem> ductInsulationTypes;
+    private readonly List<PipeInsulationSystemOption> pipeSystems;
+    private readonly List<PipeInsulationSystemOption> ductSystems;
 
     private List<PipeInsulationRule> savedUserCustomRules;
+    private List<PipeInsulationRule> savedDuctUserCustomRules;
     private bool isLoadingPreset;
 
     public ObservableCollection<PipeInsulationRule> Rules { get; private set; }
@@ -77,10 +87,15 @@ public sealed class PipeInsulationWindow : Window
     public PipeInsulationScope SelectedScope { get; private set; }
     public string SelectedSystemType { get; private set; }
     public string SelectedPresetName { get; private set; }
+    public MepTargetKind SelectedMepTarget { get; private set; } = MepTargetKind.Pipe;
 
-    public PipeInsulationWindow(List<InsulationTypeItem> insulationTypes, List<PipeInsulationSystemOption> availableSystemTypes)
+    public PipeInsulationWindow(
+        List<InsulationTypeItem> pipeInsulationTypes,
+        List<InsulationTypeItem> ductInsulationTypes,
+        List<PipeInsulationSystemOption> pipeSystems,
+        List<PipeInsulationSystemOption> ductSystems)
     {
-        Title = "BIM | Pipe Insulation";
+        Title = "BIM | Pipe & Duct Insulation";
         Width = 960;
         Height = 720;
         MinWidth = 880;
@@ -90,9 +105,14 @@ public sealed class PipeInsulationWindow : Window
         Background = Brushes.White;
         FontFamily = new FontFamily("Segoe UI");
 
-        savedUserCustomRules = LoadUserCustomRules();
+        this.pipeInsulationTypes = pipeInsulationTypes ?? new List<InsulationTypeItem>();
+        this.ductInsulationTypes = ductInsulationTypes ?? new List<InsulationTypeItem>();
+        this.pipeSystems = pipeSystems ?? new List<PipeInsulationSystemOption>();
+        this.ductSystems = ductSystems ?? new List<PipeInsulationSystemOption>();
+        savedUserCustomRules = LoadUserCustomRules(PresetFileName);
+        savedDuctUserCustomRules = LoadUserCustomRules(DuctPresetFileName);
         Rules = new ObservableCollection<PipeInsulationRule>();
-        presetItems = CreatePresetItems();
+        presetItems = new List<PipeInsulationPresetItem>();
 
         Grid root = new Grid { Margin = new Thickness(18) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -115,10 +135,32 @@ public sealed class PipeInsulationWindow : Window
 
         StackPanel topBar = new StackPanel
         {
-            Orientation = Orientation.Horizontal,
+            Orientation = Orientation.Vertical,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 0, 10)
         };
+        StackPanel targetModeBar = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(0, 0, 0, 8)
+        };
+        targetModeBar.Children.Add(CreateFieldLabel("Đối tượng áp dụng"));
+        pipeModeRadioButton = new RadioButton
+        {
+            Content = "Ống Nước (Pipes & Fittings)",
+            GroupName = "mepInsulationTarget",
+            IsChecked = true,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(16, 0, 12, 0)
+        };
+        targetModeBar.Children.Add(pipeModeRadioButton);
+        ductModeRadioButton = new RadioButton
+        {
+            Content = "Ống Gió (Ducts & Fittings)",
+            GroupName = "mepInsulationTarget"
+        };
+        targetModeBar.Children.Add(ductModeRadioButton);
+        topBar.Children.Add(targetModeBar);
         removeExistingCheckBox = new CheckBox
         {
             Content = "Thay thế insulation hiện có trong phạm vi",
@@ -144,7 +186,7 @@ public sealed class PipeInsulationWindow : Window
         insulationTypeComboBox = new ComboBox
         {
             MinHeight = 32,
-            ItemsSource = insulationTypes ?? new List<InsulationTypeItem>(),
+            ItemsSource = this.pipeInsulationTypes,
             DisplayMemberPath = "Name",
             Margin = new Thickness(0, 0, 0, 10)
         };
@@ -175,22 +217,6 @@ public sealed class PipeInsulationWindow : Window
             Margin = new Thickness(23, 0, 0, 8),
             DisplayMemberPath = "DisplayName"
         };
-        List<PipeInsulationSystemOption> systemOptions = (availableSystemTypes ?? new List<PipeInsulationSystemOption>())
-            .Where(option => option != null && !string.IsNullOrWhiteSpace(option.SystemName))
-            .GroupBy(option => option.SystemName, StringComparer.OrdinalIgnoreCase)
-            .Select(group => new PipeInsulationSystemOption
-            {
-                SystemName = group.First().SystemName,
-                PipeCount = group.Sum(option => option.PipeCount)
-            })
-            .OrderBy(option => option.SystemName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        if (systemOptions.Count == 0)
-        {
-            systemOptions.Add(new PipeInsulationSystemOption { SystemName = EmptySystemTypeMessage, PipeCount = 0 });
-        }
-        systemTypeComboBox.ItemsSource = systemOptions;
-        systemTypeComboBox.SelectedIndex = 0;
         scopePanel.Children.Add(systemTypeComboBox);
 
         selectedPipesRadioButton = new RadioButton
@@ -291,15 +317,12 @@ public sealed class PipeInsulationWindow : Window
         allInViewRadioButton.Checked += ScopeRadioButtonChecked;
         selectedPipesRadioButton.Checked += ScopeRadioButtonChecked;
         bySystemTypeRadioButton.Checked += ScopeRadioButtonChecked;
+        pipeModeRadioButton.Checked += TargetModeRadioButtonChecked;
+        ductModeRadioButton.Checked += TargetModeRadioButtonChecked;
         systemTypeComboBox.SelectionChanged += SystemTypeComboBoxSelectionChanged;
         presetComboBox.SelectionChanged += PresetComboBoxSelectionChanged;
 
-        PipeInsulationPresetItem initialPreset = savedUserCustomRules.Count > 0
-            ? FindPreset(PipeInsulationRules.UserCustomPresetKey)
-            : FindPreset(PipeInsulationRules.AllC1PresetKey);
-        SelectPreset(initialPreset, false);
-        AutoSwitchPresetForSelectedSystem();
-        UpdateSystemTypeEnabledState();
+        SwitchTarget(MepTargetKind.Pipe, false);
     }
 
     private static Border CreateHeader()
@@ -313,7 +336,7 @@ public sealed class PipeInsulationWindow : Window
         StackPanel headerContent = new StackPanel();
         headerContent.Children.Add(new TextBlock
         {
-            Text = "PIPE INSULATION",
+            Text = "PIPE & DUCT INSULATION",
             Foreground = Brushes.White,
             FontSize = 21,
             FontWeight = FontWeights.SemiBold
@@ -394,8 +417,20 @@ public sealed class PipeInsulationWindow : Window
         };
     }
 
-    private static List<PipeInsulationPresetItem> CreatePresetItems()
+    private static List<PipeInsulationPresetItem> CreatePresetItems(MepTargetKind targetKind)
     {
+        if (targetKind == MepTargetKind.Duct)
+        {
+            return new List<PipeInsulationPresetItem>
+            {
+                new PipeInsulationPresetItem { Key = PipeInsulationRules.SupplyAirPresetKey, DisplayName = "Gió Cấp (SA)" },
+                new PipeInsulationPresetItem { Key = PipeInsulationRules.ReturnAirPresetKey, DisplayName = "Gió Hồi (RA)" },
+                new PipeInsulationPresetItem { Key = PipeInsulationRules.SmokeExhaustPresetKey, DisplayName = "Hút Khói Chống Cháy EI (SE)" },
+                new PipeInsulationPresetItem { Key = PipeInsulationRules.AllDuctsPresetKey, DisplayName = "Tất cả hệ thống gió (SA / RA / SE)" },
+                new PipeInsulationPresetItem { Key = PipeInsulationRules.UserCustomPresetKey, DisplayName = "Tùy chỉnh của người dùng (User Custom)", IsUserCustom = true }
+            };
+        }
+
         return new List<PipeInsulationPresetItem>
         {
             new PipeInsulationPresetItem { Key = PipeInsulationRules.ChillerC1PresetKey, DisplayName = "Hệ Chiller (CHWS/CHWR) - Chuẩn C1" },
@@ -447,6 +482,85 @@ public sealed class PipeInsulationWindow : Window
         };
     }
 
+    private void TargetModeRadioButtonChecked(object sender, RoutedEventArgs e)
+    {
+        SwitchTarget(ductModeRadioButton.IsChecked == true ? MepTargetKind.Duct : MepTargetKind.Pipe, true);
+    }
+
+    private void SwitchTarget(MepTargetKind targetKind, bool changedByUser)
+    {
+        SelectedMepTarget = targetKind;
+        bool isDuct = targetKind == MepTargetKind.Duct;
+        Title = isDuct ? "BIM | Duct Insulation" : "BIM | Pipe Insulation";
+
+        isLoadingPreset = true;
+        insulationTypeComboBox.ItemsSource = isDuct ? ductInsulationTypes : pipeInsulationTypes;
+        insulationTypeComboBox.SelectedIndex = insulationTypeComboBox.Items.Count > 0 ? 0 : -1;
+        presetItems = CreatePresetItems(targetKind);
+        presetComboBox.ItemsSource = null;
+        presetComboBox.ItemsSource = presetItems;
+        isLoadingPreset = false;
+
+        selectedPipesRadioButton.Content = isDuct
+            ? "Ống gió đang chọn (hoặc chọn trực tiếp nếu chưa chọn)"
+            : "Đường ống đang chọn (hoặc chọn trực tiếp nếu chưa chọn)";
+        allInViewRadioButton.Content = isDuct
+            ? "Tất cả ống gió trong View"
+            : "Tất cả đường ống trong View";
+        if (rulesGrid.Columns.Count >= 3)
+        {
+            minSizeColumn = rulesGrid.Columns[1] as DataGridTextColumn;
+            maxSizeColumn = rulesGrid.Columns[2] as DataGridTextColumn;
+            if (minSizeColumn != null)
+            {
+                minSizeColumn.Header = isDuct ? "Từ cạnh max / đường kính (mm)" : "Từ DN (mm)";
+            }
+            if (maxSizeColumn != null)
+            {
+                maxSizeColumn.Header = isDuct ? "Đến cạnh max / đường kính (mm)" : "Đến DN (mm)";
+            }
+        }
+
+        UpdateSystemOptions();
+        List<PipeInsulationRule> customRules = isDuct ? savedDuctUserCustomRules : savedUserCustomRules;
+        string defaultPresetKey = isDuct ? PipeInsulationRules.AllDuctsPresetKey : PipeInsulationRules.AllC1PresetKey;
+        PipeInsulationPresetItem initialPreset = customRules.Count > 0
+            ? FindPreset(PipeInsulationRules.UserCustomPresetKey)
+            : FindPreset(defaultPresetKey);
+        SelectPreset(initialPreset, false);
+        AutoSwitchPresetForSelectedSystem();
+        UpdateSystemTypeEnabledState();
+
+        if (changedByUser)
+        {
+            presetStatusText.Text = isDuct
+                ? "Đã chuyển sang Ống Gió. Danh sách type, system và preset đã được cập nhật."
+                : "Đã chuyển sang Ống Nước. Danh sách type, system và preset đã được cập nhật.";
+        }
+    }
+
+    private void UpdateSystemOptions()
+    {
+        IEnumerable<PipeInsulationSystemOption> source = SelectedMepTarget == MepTargetKind.Duct ? ductSystems : pipeSystems;
+        List<PipeInsulationSystemOption> systemOptions = source
+            .Where(option => option != null && !string.IsNullOrWhiteSpace(option.SystemName))
+            .GroupBy(option => option.SystemName, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new PipeInsulationSystemOption
+            {
+                SystemName = group.First().SystemName,
+                PipeCount = group.Sum(option => option.PipeCount)
+            })
+            .OrderBy(option => option.SystemName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (systemOptions.Count == 0)
+        {
+            systemOptions.Add(new PipeInsulationSystemOption { SystemName = EmptySystemTypeMessage, PipeCount = 0 });
+        }
+
+        systemTypeComboBox.ItemsSource = systemOptions;
+        systemTypeComboBox.SelectedIndex = 0;
+    }
+
     private void ScopeRadioButtonChecked(object sender, RoutedEventArgs e)
     {
         UpdateSystemTypeEnabledState();
@@ -478,7 +592,7 @@ public sealed class PipeInsulationWindow : Window
             return;
         }
 
-        string suggestedPresetKey = PipeInsulationRules.SuggestedPresetKey(selectedSystem.SystemName);
+        string suggestedPresetKey = PipeInsulationRules.SuggestedPresetKey(SelectedMepTarget, selectedSystem.SystemName);
         if (!string.IsNullOrWhiteSpace(suggestedPresetKey))
         {
             SelectPreset(FindPreset(suggestedPresetKey), true);
@@ -514,16 +628,19 @@ public sealed class PipeInsulationWindow : Window
 
     private void LoadPreset(PipeInsulationPresetItem preset, bool wasAutoSelected)
     {
-        List<PipeInsulationRule> rules = preset.IsUserCustom && savedUserCustomRules.Count > 0
-            ? CloneRules(savedUserCustomRules)
-            : PipeInsulationRules.DefaultForPreset(preset.Key);
+        List<PipeInsulationRule> customRules = SelectedMepTarget == MepTargetKind.Duct
+            ? savedDuctUserCustomRules
+            : savedUserCustomRules;
+        List<PipeInsulationRule> rules = preset.IsUserCustom && customRules.Count > 0
+            ? CloneRules(customRules)
+            : PipeInsulationRules.DefaultForPreset(SelectedMepTarget, preset.Key);
         ReplaceRules(rules);
 
         if (wasAutoSelected)
         {
             presetStatusText.Text = "Đã tự động chọn “" + preset.DisplayName + "” theo System Type trong view.";
         }
-        else if (preset.IsUserCustom && savedUserCustomRules.Count == 0)
+        else if (preset.IsUserCustom && customRules.Count == 0)
         {
             presetStatusText.Text = "Chưa có preset người dùng đã lưu. Bảng đang bắt đầu từ chuẩn Multi-System C1.";
         }
@@ -543,12 +660,14 @@ public sealed class PipeInsulationWindow : Window
 
         if (selectedPreset.IsUserCustom)
         {
-            ReplaceRules(PipeInsulationRules.DefaultAllC1());
+            ReplaceRules(PipeInsulationRules.DefaultForPreset(
+                SelectedMepTarget,
+                SelectedMepTarget == MepTargetKind.Duct ? PipeInsulationRules.AllDuctsPresetKey : PipeInsulationRules.AllC1PresetKey));
             presetStatusText.Text = "Đã nạp lại chuẩn C1 Multi-System. Chọn Lưu Preset này nếu muốn thay User Custom.";
             return;
         }
 
-        ReplaceRules(PipeInsulationRules.DefaultForPreset(selectedPreset.Key));
+        ReplaceRules(PipeInsulationRules.DefaultForPreset(SelectedMepTarget, selectedPreset.Key));
         presetStatusText.Text = "Đã nạp lại “" + selectedPreset.DisplayName + "” theo chuẩn C1.";
     }
 
@@ -595,19 +714,28 @@ public sealed class PipeInsulationWindow : Window
         }
 
         string saveError;
-        if (!SaveUserCustomRules(validRules, out saveError))
+        string presetFileName = SelectedMepTarget == MepTargetKind.Duct ? DuctPresetFileName : PresetFileName;
+        if (!SaveUserCustomRules(validRules, presetFileName, out saveError))
         {
             MessageBox.Show("Không thể lưu preset người dùng.\n" + saveError, Title, MessageBoxButton.OK, MessageBoxImage.Error);
             return;
         }
 
-        savedUserCustomRules = CloneRules(validRules);
+        if (SelectedMepTarget == MepTargetKind.Duct)
+        {
+            savedDuctUserCustomRules = CloneRules(validRules);
+        }
+        else
+        {
+            savedUserCustomRules = CloneRules(validRules);
+        }
         SelectPreset(FindPreset(PipeInsulationRules.UserCustomPresetKey), false);
         presetStatusText.Text = "Đã lưu vào %APPDATA%\\BIN_PipeInsulation\\presets.json dưới tên User Custom.";
     }
 
     private void ApplyButtonClicked(object sender, RoutedEventArgs e)
     {
+        SelectedMepTarget = ductModeRadioButton.IsChecked == true ? MepTargetKind.Duct : MepTargetKind.Pipe;
         List<PipeInsulationRule> validRules = GetValidRules();
         if (insulationTypeComboBox.SelectedItem == null)
         {
@@ -682,7 +810,7 @@ public sealed class PipeInsulationWindow : Window
 
     private static bool IsValidRule(PipeInsulationRule rule)
     {
-        return rule != null && !string.IsNullOrWhiteSpace(rule.System) && rule.MinDN > 0 &&
+        return rule != null && !string.IsNullOrWhiteSpace(rule.System) && rule.MinDN >= 0 &&
                rule.MaxDN >= rule.MinDN && rule.ThicknessMM > 0;
     }
 
@@ -702,16 +830,18 @@ public sealed class PipeInsulationWindow : Window
         return (rules ?? Enumerable.Empty<PipeInsulationRule>()).Select(CloneRule).ToList();
     }
 
-    private static List<PipeInsulationRule> LoadUserCustomRules()
+    private static List<PipeInsulationRule> LoadUserCustomRules(string fileName)
     {
-        List<PipeInsulationRule> rules = LoadRulesFromFile(PresetFileName);
+        List<PipeInsulationRule> rules = LoadRulesFromFile(fileName);
         if (rules.Count > 0)
         {
             return rules;
         }
 
-        // Legacy system_rules.json becomes the initial User Custom preset until saved.
-        return LoadRulesFromFile(LegacyRulesFileName);
+        // Legacy system_rules.json belongs only to the original pipe tool.
+        return string.Equals(fileName, PresetFileName, StringComparison.OrdinalIgnoreCase)
+            ? LoadRulesFromFile(LegacyRulesFileName)
+            : new List<PipeInsulationRule>();
     }
 
     private static List<PipeInsulationRule> LoadRulesFromFile(string fileName)
@@ -758,7 +888,7 @@ public sealed class PipeInsulationWindow : Window
         }
     }
 
-    private static bool SaveUserCustomRules(IEnumerable<PipeInsulationRule> rules, out string error)
+    private static bool SaveUserCustomRules(IEnumerable<PipeInsulationRule> rules, string fileName, out string error)
     {
         try
         {
@@ -784,7 +914,7 @@ public sealed class PipeInsulationWindow : Window
             }
             json.AppendLine("  ]");
             json.AppendLine("}");
-            File.WriteAllText(PresetFileName, json.ToString(), new UTF8Encoding(false));
+            File.WriteAllText(fileName, json.ToString(), new UTF8Encoding(false));
             error = null;
             return true;
         }
