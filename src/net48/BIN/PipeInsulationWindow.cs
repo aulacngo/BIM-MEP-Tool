@@ -59,6 +59,7 @@ public sealed class PipeInsulationWindow : Window
     private readonly ComboBox systemTypeComboBox;
     private readonly ComboBox presetComboBox;
     private readonly CheckBox removeExistingCheckBox;
+    private readonly CheckBox smoothTeesCheckBox;
     private readonly RadioButton allInViewRadioButton;
     private readonly RadioButton selectedPipesRadioButton;
     private readonly RadioButton bySystemTypeRadioButton;
@@ -72,6 +73,7 @@ public sealed class PipeInsulationWindow : Window
     public ObservableCollection<PipeInsulationRule> Rules { get; private set; }
     public InsulationTypeItem SelectedInsulationType { get; private set; }
     public bool RemoveExisting { get; private set; }
+    public bool SmoothTees { get; private set; }
     public PipeInsulationScope SelectedScope { get; private set; }
     public string SelectedSystemType { get; private set; }
     public string SelectedPresetName { get; private set; }
@@ -108,6 +110,33 @@ public sealed class PipeInsulationWindow : Window
         setupGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(285) });
         setupGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
         setupGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        setupGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        setupGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        StackPanel topBar = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 0, 10)
+        };
+        removeExistingCheckBox = new CheckBox
+        {
+            Content = "Thay thế insulation hiện có trong phạm vi",
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = new SolidColorBrush(Color.FromRgb(58, 69, 84))
+        };
+        topBar.Children.Add(removeExistingCheckBox);
+        smoothTeesCheckBox = new CheckBox
+        {
+            Content = "Khử khối vuông ở Tê (Làm mượt ngã ba chữ T)",
+            IsChecked = true,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(16, 2, 0, 2),
+            ToolTip = "Bỏ qua tạo khối hộp thô của Tê trong Revit để lớp bảo ôn đường tự đâm vào nhau trơn láng, tự nhiên."
+        };
+        topBar.Children.Add(smoothTeesCheckBox);
+        Grid.SetColumnSpan(topBar, 3);
+        setupGrid.Children.Add(topBar);
 
         StackPanel materialPanel = new StackPanel();
         materialPanel.Children.Add(CreateSectionTitle("Thiết lập insulation"));
@@ -124,13 +153,7 @@ public sealed class PipeInsulationWindow : Window
             insulationTypeComboBox.SelectedIndex = 0;
         }
         materialPanel.Children.Add(insulationTypeComboBox);
-        removeExistingCheckBox = new CheckBox
-        {
-            Content = "Thay thế insulation hiện có trong phạm vi",
-            Margin = new Thickness(0, 2, 0, 0),
-            Foreground = new SolidColorBrush(Color.FromRgb(58, 69, 84))
-        };
-        materialPanel.Children.Add(removeExistingCheckBox);
+        Grid.SetRow(materialPanel, 1);
         Grid.SetColumn(materialPanel, 0);
         setupGrid.Children.Add(materialPanel);
 
@@ -183,6 +206,7 @@ public sealed class PipeInsulationWindow : Window
             GroupName = "pipeInsulationScope"
         };
         scopePanel.Children.Add(allInViewRadioButton);
+        Grid.SetRow(scopePanel, 1);
         Grid.SetColumn(scopePanel, 2);
         setupGrid.Children.Add(scopePanel);
 
@@ -622,6 +646,7 @@ public sealed class PipeInsulationWindow : Window
 
         SelectedInsulationType = insulationTypeComboBox.SelectedItem as InsulationTypeItem;
         RemoveExisting = removeExistingCheckBox.IsChecked == true;
+        SmoothTees = smoothTeesCheckBox.IsChecked == true;
         SelectedPresetName = (presetComboBox.SelectedItem as PipeInsulationPresetItem)?.DisplayName ?? "Tùy chỉnh";
 
         ReplaceRules(validRules);

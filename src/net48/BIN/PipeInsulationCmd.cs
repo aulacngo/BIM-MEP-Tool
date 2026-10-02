@@ -48,6 +48,13 @@ public class PipeInsulationCmd : IExternalCommand
                 return selectionResult;
             }
 
+            List<Element> teeFittings = new List<Element>();
+            if (ui.SmoothTees)
+            {
+                teeFittings = fittingElements.Where(IsTeeOrBranchFitting).ToList();
+                fittingElements = fittingElements.Where(fitting => !IsTeeOrBranchFitting(fitting)).ToList();
+            }
+
             List<PipeInsulationRule> systemRules = ui.Rules
                 .Where(rule => rule != null && rule.MinDN > 0 && rule.MaxDN >= rule.MinDN && rule.ThicknessMM > 0)
                 .ToList();
@@ -67,13 +74,19 @@ public class PipeInsulationCmd : IExternalCommand
                     failureOptions.SetClearAfterRollback(true);
                     transaction.SetFailureHandlingOptions(failureOptions);
 
+                    if (teeFittings.Count > 0)
+                    {
+                        removedCount += RemoveExistingInsulation(doc, new List<Element>(), teeFittings);
+                    }
+
                     if (ui.RemoveExisting)
                     {
-                        removedCount = RemoveExistingInsulation(doc, pipeElements, fittingElements);
-                        if (removedCount > 0)
-                        {
-                            doc.Regenerate();
-                        }
+                        removedCount += RemoveExistingInsulation(doc, pipeElements, fittingElements);
+                    }
+
+                    if (removedCount > 0)
+                    {
+                        doc.Regenerate();
                     }
 
                     foreach (Element element in pipeElements)
@@ -180,7 +193,8 @@ public class PipeInsulationCmd : IExternalCommand
             ExpandedContent = "Phạm vi: " + ScopeDescription(ui) + "\n" +
                               "Preset: " + ui.SelectedPresetName + "\n" +
                               "Đối tượng trong phạm vi: " + pipeCount + " ống, " + fittingCount + " fitting" +
-                              (ui.RemoveExisting ? "\nĐã xóa insulation cũ: " + removedCount : string.Empty),
+                              ((ui.RemoveExisting || removedCount > 0) ? "\nĐã xóa insulation cũ: " + removedCount : string.Empty) +
+                              (ui.SmoothTees ? "\nChế độ làm mượt ngã ba chữ T: ĐÃ BẬT (không tạo khối vuông ở Tê)" : string.Empty),
             MainIcon = TaskDialogIcon.TaskDialogIconInformation,
             CommonButtons = TaskDialogCommonButtons.Ok
         };
@@ -290,6 +304,45 @@ public class PipeInsulationCmd : IExternalCommand
     {
         return element != null && element.Category != null &&
                element.Category.Id.Equals(new ElementId((int)BuiltInCategory.OST_PipeFitting));
+    }
+
+    private static bool IsTeeOrBranchFitting(Element fitting)
+    {
+        FamilyInstance familyInstance = fitting as FamilyInstance;
+        if (familyInstance == null)
+        {
+            return false;
+        }
+
+        Parameter partTypeParam = familyInstance.Symbol?.Family?.get_Parameter(BuiltInParameter.FAMILY_CONTENT_PART_TYPE);
+        if (partTypeParam != null)
+        {
+            int partTypeValue = partTypeParam.AsInteger();
+            if (partTypeValue == (int)PartType.Tee || partTypeValue == (int)PartType.Cross)
+            {
+                return true;
+            }
+        }
+
+        if (familyInstance.MEPModel?.ConnectorManager?.Connectors != null)
+        {
+            int pipeConnectorCount = 0;
+            foreach (Connector connector in familyInstance.MEPModel.ConnectorManager.Connectors)
+            {
+                if (connector.Domain == Domain.DomainPiping)
+                {
+                    pipeConnectorCount++;
+                }
+            }
+
+            if (pipeConnectorCount >= 3)
+            {
+                return true;
+            }
+        }
+
+        string name = ((familyInstance.Name ?? string.Empty) + " " + (familyInstance.Symbol?.Family?.Name ?? string.Empty)).ToLowerInvariant();
+        return name.Contains("tee") || name.Contains("tê") || name.Contains("cross");
     }
 
     private static string ScopeDescription(PipeInsulationWindow ui)
