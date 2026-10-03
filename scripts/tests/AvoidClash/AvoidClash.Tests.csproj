@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="RevitTestDouble.cs" />
+    <Compile Include="../../../src/net8.0-windows/BIN/AvoidClashGeometry.cs" Link="AvoidClashGeometry.cs" />
+    <Compile Include="../../../src/net8.0-windows/BIN/AvoidClashWindow.cs" Link="AvoidClashWindow.cs" />
+  </ItemGroup>
+</Project>

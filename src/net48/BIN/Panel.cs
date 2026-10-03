@@ -185,7 +185,7 @@ public class Panel : IExternalApplication
 	{
 		List<PushButtonData> p = new List<PushButtonData>
 		{
-			CreatePushData("AvoidClash", "Avoid\nClash", "AvoidClashCmd", "AvoidClash", "Avoid Clash - Tu dong uon 4 cut ne va cham"),
+			CreatePushData("AvoidClash", "Avoid\nClash", "AvoidClashCmd", "AvoidClash", "Avoid Clash - Pipe/Duct: U45, U90 (4 co), Z45 (2 co, doi cao do)"),
 			CreatePushData("Bloom", "Bloom", "BloomCmd", "CreatePipeFromFitting", "Bloom"),
 			CreatePushData("SplitDuct", "Split\nDuct", "SplitDuctCmd", "SplitDuct", "Split Duct"),
 			CreatePushData("PlaceFamily", "Place\nFamily", "PlaceFamily", "PlaceFamily", "Place Family"),

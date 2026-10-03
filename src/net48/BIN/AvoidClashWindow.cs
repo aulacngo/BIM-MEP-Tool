@@ -1,6 +1,7 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -12,23 +13,15 @@ using RevitTransform = Autodesk.Revit.DB.Transform;
 
 namespace BIN;
 
-public enum BypassDirection
-{
-	Up,
-	Down,
-	Left,
-	Right
-}
-
 public class AvoidClashWindow : Window
 {
-	private UIDocument _uidoc;
 	private Document _doc;
-	private Element _runningPipeElem;
+	private Element _runningMepElem;
 	private Element _obstacleElem;
 	private RevitTransform _obstacleTransform;
 
-	private double _angleDegree = 45.0;
+	private BypassShapeMode _shapeMode = BypassShapeMode.U45;
+	private bool _applying;
 	private BypassDirection _direction = BypassDirection.Down;
 	private double _clearanceMm = 50.0;
 
@@ -40,20 +33,36 @@ public class AvoidClashWindow : Window
 	private Button _btnRight;
 	private Button _btn45;
 	private Button _btn90;
+	private Button _btnZ45;
+	private CheckBox _allowDisconnect;
+	private TextBlock _lblModeNote;
+	private bool _endConnected;
+	private string _endDescription;
 	private Canvas _canvas;
 
-	public AvoidClashWindow(UIDocument uidoc, Element runningPipeElem, Element obstacleElem, RevitTransform obstacleTransform = null)
+	public AvoidClashWindow(UIDocument uidoc, Element runningMepElem, Element obstacleElem, RevitTransform obstacleTransform = null)
 	{
-		_uidoc = uidoc;
 		_doc = uidoc.Document;
-		_runningPipeElem = runningPipeElem;
+		_runningMepElem = runningMepElem;
 		_obstacleElem = obstacleElem;
 		_obstacleTransform = obstacleTransform ?? RevitTransform.Identity;
 
-		Title = "BIM TOOL - AVOID CLASH (NE VA CHAM TU DONG)";
-		Width = 430;
-		Height = 560;
-		WindowStartupLocation = WindowStartupLocation.CenterScreen;
+		MEPCurve curve = runningMepElem as MEPCurve;
+        Autodesk.Revit.DB.Line line = (curve?.Location as LocationCurve)?.Curve as Autodesk.Revit.DB.Line;
+        if (line != null)
+        {
+            XYZ end = line.GetEndPoint(1);
+            Connector endConnector = curve.ConnectorManager.Connectors.Cast<Connector>()
+                .Where(c => c.ConnectorType == ConnectorType.End).OrderBy(c => c.Origin.DistanceTo(end)).FirstOrDefault();
+            _endConnected = endConnector != null && endConnector.IsConnected;
+            _endDescription = "Đầu 2: (" + Math.Round(end.X * 304.8) + ", " + Math.Round(end.Y * 304.8) + ", "
+                + Math.Round(end.Z * 304.8) + " mm)";
+        }
+        Title = "BIM TOOL - AVOID CLASH | PIPE + DUCT";
+		Width = 480;
+		SizeToContent = SizeToContent.Height;
+		MaxHeight = SystemParameters.WorkArea.Height * 0.95;
+		WindowStartupLocation = WindowStartupLocation.CenterOwner;
 		ResizeMode = ResizeMode.NoResize;
 		Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(248, 250, 252));
 
@@ -65,7 +74,7 @@ public class AvoidClashWindow : Window
 	{
 		System.Windows.Controls.Grid root = new System.Windows.Controls.Grid();
 		root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Header
-		root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(140) }); // Diagram
+		root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(180) }); // Diagram
 		root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Controls
 		root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Footer / Buttons
 
@@ -82,14 +91,14 @@ public class AvoidClashWindow : Window
 		StackPanel headerStack = new StackPanel();
 		TextBlock txtTitle = new TextBlock
 		{
-			Text = "BIM TOOL - AVOID CLASH (Bypass 45 / 90 deg)",
+			Text = "AVOID CLASH · PIPE + DUCT · U45 / U90 / Z45",
 			Foreground = System.Windows.Media.Brushes.White,
 			FontSize = 14,
 			FontWeight = FontWeights.Bold
 		};
 		TextBlock txtSubtitle = new TextBlock
 		{
-			Text = "Tu dong chen 4 cut ne ong, ong gio, mang cap va dam ket cau",
+			Text = "Ống nước · Ống gió tròn · Ống gió chữ nhật",
 			Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(148, 163, 184)),
 			FontSize = 11,
 			Margin = new Thickness(0, 4, 0, 0)
@@ -118,9 +127,9 @@ public class AvoidClashWindow : Window
 			BorderBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(226, 232, 240)),
 			BorderThickness = new Thickness(1)
 		};
-		_canvas = new Canvas { ClipToBounds = true };
+		_canvas = new Canvas { Width = 440, Height = 170, ClipToBounds = true };
 		UpdateDiagram();
-		diagramBorder.Child = _canvas;
+		diagramBorder.Child = new Viewbox { Stretch = Stretch.Uniform, Child = _canvas };
 		System.Windows.Controls.Grid.SetRow(diagramBorder, 1);
 		root.Children.Add(diagramBorder);
 
@@ -130,7 +139,7 @@ public class AvoidClashWindow : Window
 		// Angle Selection
 		TextBlock lblAngle = new TextBlock
 		{
-			Text = "GOC NE VA CHAM (Bypass Angle):",
+			Text = "HÌNH DẠNG BYPASS:",
 			FontWeight = FontWeights.SemiBold,
 			FontSize = 11,
 			Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(71, 85, 105))
@@ -142,22 +151,31 @@ public class AvoidClashWindow : Window
 		angleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(8) });
 		angleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-		_btn45 = CreateToggleButton("45 deg (Chuan Thuy Luc)", true);
-		_btn45.Click += (s, e) => SelectAngle(45.0);
+		_btn45 = CreateToggleButton("Cầu U 45° Thủy Lực", true);
+		_btn45.Click += (s, e) => SelectShape(BypassShapeMode.U45);
 		System.Windows.Controls.Grid.SetColumn(_btn45, 0);
 		angleGrid.Children.Add(_btn45);
 
-		_btn90 = CreateToggleButton("90 deg (Vuong Goc)", false);
-		_btn90.Click += (s, e) => SelectAngle(90.0);
+		_btn90 = CreateToggleButton("Cầu U 90° Vuông Góc", false);
+		_btn90.Click += (s, e) => SelectShape(BypassShapeMode.U90);
 		System.Windows.Controls.Grid.SetColumn(_btn90, 2);
 		angleGrid.Children.Add(_btn90);
 
 		body.Children.Add(angleGrid);
+        _btnZ45 = CreateToggleButton("Bẻ Chữ Z 45° (Đổi cao độ) · 2 co 45°", false);
+        _btnZ45.Click += (s, e) => SelectShape(BypassShapeMode.Z45);
+        body.Children.Add(_btnZ45);
+        _lblModeNote = new TextBlock { FontSize = 11, TextWrapping = TextWrapping.Wrap,
+            Foreground = System.Windows.Media.Brushes.DimGray, Margin = new Thickness(0, 6, 0, 6) };
+        body.Children.Add(_lblModeNote);
+        _allowDisconnect = new CheckBox { Content = "Cho phép ngắt đầu cuối đang nối (Z45)", FontSize = 11,
+            Foreground = System.Windows.Media.Brushes.DarkOrange, Margin = new Thickness(0, 0, 0, 8) };
+        body.Children.Add(_allowDisconnect);
 
 		// Direction Selection
 		TextBlock lblDir = new TextBlock
 		{
-			Text = "HUONG NE (Go SPACE de dao Len/Xuong):",
+			Text = "HƯỚNG NÉ (SPACE đảo Lên/Xuống):",
 			FontWeight = FontWeights.SemiBold,
 			FontSize = 11,
 			Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(71, 85, 105))
@@ -173,22 +191,22 @@ public class AvoidClashWindow : Window
 		dirGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(6) });
 		dirGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-		_btnUp = CreateToggleButton("Up (Len)", false);
+		_btnUp = CreateToggleButton("Lên ↑", false);
 		_btnUp.Click += (s, e) => SelectDirection(BypassDirection.Up);
 		System.Windows.Controls.Grid.SetColumn(_btnUp, 0);
 		dirGrid.Children.Add(_btnUp);
 
-		_btnDown = CreateToggleButton("Down (Xuong)", true);
+		_btnDown = CreateToggleButton("Xuống ↓", true);
 		_btnDown.Click += (s, e) => SelectDirection(BypassDirection.Down);
 		System.Windows.Controls.Grid.SetColumn(_btnDown, 2);
 		dirGrid.Children.Add(_btnDown);
 
-		_btnLeft = CreateToggleButton("Left (Trai)", false);
+		_btnLeft = CreateToggleButton("Trái ←", false);
 		_btnLeft.Click += (s, e) => SelectDirection(BypassDirection.Left);
 		System.Windows.Controls.Grid.SetColumn(_btnLeft, 4);
 		dirGrid.Children.Add(_btnLeft);
 
-		_btnRight = CreateToggleButton("Right (Phai)", false);
+		_btnRight = CreateToggleButton("Phải →", false);
 		_btnRight.Click += (s, e) => SelectDirection(BypassDirection.Right);
 		System.Windows.Controls.Grid.SetColumn(_btnRight, 6);
 		dirGrid.Children.Add(_btnRight);
@@ -198,7 +216,7 @@ public class AvoidClashWindow : Window
 		// Clearance Input
 		TextBlock lblClearance = new TextBlock
 		{
-			Text = "KHOANG HO AN TOAN (Clearance - mm):",
+			Text = "KHOẢNG HỞ AN TOÀN (mm):",
 			FontWeight = FontWeights.SemiBold,
 			FontSize = 11,
 			Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(71, 85, 105))
@@ -229,8 +247,9 @@ public class AvoidClashWindow : Window
 		};
 		_lblStatus = new TextBlock
 		{
-			Text = "Phim tat: [ SPACE ] dao chieu | [ ENTER ] thuc hien | [ ESC ] huy",
+			Text = "SPACE: đảo chiều · ENTER: thực hiện · ESC: đóng",
 			FontSize = 11,
+			TextWrapping = TextWrapping.Wrap,
 			Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(22, 101, 52)),
 			FontWeight = FontWeights.SemiBold
 		};
@@ -248,7 +267,7 @@ public class AvoidClashWindow : Window
 
 		Button btnCancel = new Button
 		{
-			Content = "Dong (ESC)",
+			Content = "ĐÓNG (ESC)",
 			Height = 38,
 			Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(241, 245, 249)),
 			BorderBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(203, 213, 225)),
@@ -261,7 +280,7 @@ public class AvoidClashWindow : Window
 
 		Button btnApply = new Button
 		{
-			Content = "THUC HIEN NE (ENTER)",
+			Content = "THỰC HIỆN (ENTER)",
 			Height = 38,
 			Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(37, 99, 235)),
 			Foreground = System.Windows.Media.Brushes.White,
@@ -274,7 +293,9 @@ public class AvoidClashWindow : Window
 		System.Windows.Controls.Grid.SetRow(actionGrid, 3);
 		root.Children.Add(actionGrid);
 
-		Content = root;
+        Content = new ScrollViewer { Background = Background, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = root };
+        SelectShape(BypassShapeMode.U45);
 	}
 
 	private void UpdateDiagram()
@@ -285,9 +306,9 @@ public class AvoidClashWindow : Window
 		SolidColorBrush obstacleBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(220, 38, 38));
 		SolidColorBrush pipeBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(37, 99, 235));
 		SolidColorBrush lateralBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(124, 58, 237));
-		const double centerY = 72.0;
+		const double centerY = 96.0;
 		const double obstacleX = 174.0;
-		const double obstacleY = 54.0;
+		const double obstacleY = 78.0;
 
 		AddDiagramBadge(GetDiagramBadgeText());
 		System.Windows.Shapes.Rectangle obstacle = new System.Windows.Shapes.Rectangle
@@ -306,61 +327,53 @@ public class AvoidClashWindow : Window
 
 		bool verticalBypass = _direction == BypassDirection.Down || _direction == BypassDirection.Up;
 		bool lowerOffset = _direction == BypassDirection.Down || _direction == BypassDirection.Left;
-		double bypassY = lowerOffset ? 112.0 : 32.0;
+		double bypassY = lowerOffset ? 142.0 : 50.0;
 		SolidColorBrush pathBrush = verticalBypass ? pipeBrush : lateralBrush;
-		DrawPipePath(BuildDiagramPath(centerY, bypassY, _angleDegree == 90.0), pathBrush);
+		DrawPipePath(BuildDiagramPath(centerY, bypassY), pathBrush);
 
 		if (verticalBypass)
 		{
-			AddDiagramText("ONG CHINH", 22, centerY + 7, pipeBrush);
+			AddDiagramText("ĐẦU 1", 22, centerY + 7, pipeBrush);
 		}
 		else
 		{
 			AddDiagramText(_direction == BypassDirection.Left
 				? "<- NE TRAI (mat bang)"
 				: "NE PHAI (mat bang) ->",
-				126, lowerOffset ? 116 : 14, lateralBrush);
+				126, lowerOffset ? 154 : 32, lateralBrush);
 		}
-		AddDiagramText("VAT CAN / DAM", obstacleX + 4, obstacleY + 11, obstacleBrush);
+		AddDiagramText("VẬT CẢN / DẦM", obstacleX + 4, obstacleY + 11, obstacleBrush);
 	}
 
-	private List<System.Windows.Point> BuildDiagramPath(double centerY, double bypassY, bool squareBypass)
+	private List<System.Windows.Point> BuildDiagramPath(double centerY, double bypassY)
 	{
-		if (squareBypass)
+		if (_shapeMode == BypassShapeMode.U90)
 		{
 			return new List<System.Windows.Point>
 			{
 				new System.Windows.Point(18, centerY), new System.Windows.Point(140, centerY),
 				new System.Windows.Point(140, bypassY), new System.Windows.Point(280, bypassY),
-				new System.Windows.Point(280, centerY), new System.Windows.Point(402, centerY)
+				new System.Windows.Point(280, centerY), new System.Windows.Point(422, centerY)
 			};
 		}
-		return new List<System.Windows.Point>
-		{
-			new System.Windows.Point(18, centerY), new System.Windows.Point(120, centerY),
-			new System.Windows.Point(160, bypassY), new System.Windows.Point(260, bypassY),
-			new System.Windows.Point(300, centerY), new System.Windows.Point(402, centerY)
-		};
-	}
+        double run = Math.Abs(bypassY - centerY);
+        var points = new List<System.Windows.Point> {
+            new System.Windows.Point(18, centerY), new System.Windows.Point(160 - run, centerY),
+            new System.Windows.Point(160, bypassY) };
+        if (_shapeMode == BypassShapeMode.Z45) points.Add(new System.Windows.Point(422, bypassY));
+        else {
+            points.Add(new System.Windows.Point(260, bypassY));
+            points.Add(new System.Windows.Point(260 + run, centerY));
+            points.Add(new System.Windows.Point(422, centerY));
+        }
+        return points;
+    }
 
-	private string GetDiagramBadgeText()
-	{
-		if (_direction == BypassDirection.Down)
-		{
-			return _angleDegree == 90.0
-				? "Dung 90 deg: U-Bypass Vuong Goc (Ne sat dam)"
-				: "Dung 45 deg: Xien Vat Chuan Thuy Luc";
-		}
-		if (_direction == BypassDirection.Up)
-		{
-			return _angleDegree == 90.0
-				? "Dung 90 deg: U-Bypass Vuong Goc (Ne len)"
-				: "Dung 45 deg: Xien Vat Chuan Thuy Luc (Ne len)";
-		}
-		return _direction == BypassDirection.Left
-			? "Ne Trai: Offset ngang theo mat bang"
-			: "Ne Phai: Offset ngang theo mat bang";
-	}
+    private string GetDiagramBadgeText()
+    {
+        string mode = _shapeMode == BypassShapeMode.U45 ? "U45 · 4 co 45°" : _shapeMode == BypassShapeMode.U90 ? "U90 · 4 co 90°" : "Z45 · 2 co 45° · Đi tiếp ở vị trí mới";
+        return mode + ((_direction == BypassDirection.Up || _direction == BypassDirection.Down) ? " · Mặt đứng" : " · Mặt bằng");
+    }
 
 	private void AddDiagramBadge(string text)
 	{
@@ -403,6 +416,19 @@ public class AvoidClashWindow : Window
 			StrokeStartLineCap = PenLineCap.Round,
 			StrokeEndLineCap = PenLineCap.Round
 		});
+        for (int i = 1; i < points.Count - 1; i++)
+        {
+            var marker = new System.Windows.Shapes.Ellipse { Width = 8, Height = 8, Fill = System.Windows.Media.Brushes.White,
+                Stroke = brush, StrokeThickness = 2 };
+            Canvas.SetLeft(marker, points[i].X - 4); Canvas.SetTop(marker, points[i].Y - 4);
+            _canvas.Children.Add(marker);
+        }
+        System.Windows.Point end = points[points.Count - 1];
+        _canvas.Children.Add(new Polyline { Stroke = brush, StrokeThickness = 3,
+            Points = new PointCollection { new System.Windows.Point(end.X - 9, end.Y - 5), end,
+                new System.Windows.Point(end.X - 9, end.Y + 5) } });
+        AddDiagramText(_shapeMode == BypassShapeMode.Z45 ? "ĐẦU 2 · VỊ TRÍ MỚI →" : "ĐẦU 2 · VỊ TRÍ CŨ",
+            _shapeMode == BypassShapeMode.Z45 ? 287 : 335, end.Y + 10, brush);
 	}
 
 	private void AddDiagramText(string text, double left, double top, SolidColorBrush brush)
@@ -450,13 +476,20 @@ public class AvoidClashWindow : Window
 		}
 	}
 
-	private void SelectAngle(double angle)
-	{
-		_angleDegree = angle;
-		UpdateToggleStyle(_btn45, angle == 45.0);
-		UpdateToggleStyle(_btn90, angle == 90.0);
-		UpdateDiagram();
-	}
+    private void SelectShape(BypassShapeMode mode)
+    {
+        _shapeMode = mode;
+        UpdateToggleStyle(_btn45, mode == BypassShapeMode.U45);
+        UpdateToggleStyle(_btn90, mode == BypassShapeMode.U90);
+        UpdateToggleStyle(_btnZ45, mode == BypassShapeMode.Z45);
+        bool z = mode == BypassShapeMode.Z45;
+        _allowDisconnect.Visibility = z && _endConnected ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+        if (!z) _allowDisconnect.IsChecked = false;
+        _lblModeNote.Text = z ? "Giữ đầu 1; chuyển đầu 2 theo hướng né. " + _endDescription
+            + (_endConnected ? " · Đầu 2 đang nối: cần cho phép ngắt kết nối." : " · Đầu 2 đang mở.")
+            : "Giữ vị trí và kết nối hai đầu; trở về cao độ cũ sau vật cản.";
+        UpdateDiagram();
+    }
 
 	private void SelectDirection(BypassDirection dir)
 	{
@@ -470,6 +503,7 @@ public class AvoidClashWindow : Window
 
 	private void AvoidClashWindow_PreviewKeyDown(object sender, KeyEventArgs e)
 	{
+		if (e.IsRepeat) return;
 		if (e.Key == Key.Space)
 		{
 			// Toggle Up <-> Down
@@ -488,22 +522,27 @@ public class AvoidClashWindow : Window
 		}
 	}
 
-	private void ApplyBypass()
-	{
-		if (double.TryParse(_txtClearance.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double val))
-		{
-			_clearanceMm = Math.Max(10.0, val);
-		}
-
-		bool success = AvoidClashCmd.ExecuteBypass(_doc, _runningPipeElem, _obstacleElem, _obstacleTransform, _angleDegree, _direction, _clearanceMm, out string err);
-		if (success)
-		{
-			Close();
-		}
-		else
-		{
-			_lblStatus.Text = "Loi: " + err;
-			_lblStatus.Foreground = System.Windows.Media.Brushes.Red;
-		}
-	}
+    private void ApplyBypass()
+    {
+        if (_applying) return;
+        if (!(double.TryParse(_txtClearance.Text, NumberStyles.Float, CultureInfo.CurrentCulture, out double val)
+            || double.TryParse(_txtClearance.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out val))
+            || !AvoidClashGeometry.Finite(val) || val < 10)
+        {
+            _lblStatus.Text = "Lỗi: Khoảng hở phải là số hữu hạn, tối thiểu 10 mm.";
+            _lblStatus.Foreground = System.Windows.Media.Brushes.Red;
+            _txtClearance.Focus();
+            return;
+        }
+        _clearanceMm = val;
+        _applying = true;
+        try
+        {
+            bool success = AvoidClashCmd.ExecuteBypass(_doc, _runningMepElem, _obstacleElem, _obstacleTransform,
+                _shapeMode, _direction, _clearanceMm, out string err, _allowDisconnect.IsChecked == true);
+            if (success) DialogResult = true;
+            else { _lblStatus.Text = "Lỗi: " + err; _lblStatus.Foreground = System.Windows.Media.Brushes.Red; }
+        }
+        finally { _applying = false; }
+    }
 }
