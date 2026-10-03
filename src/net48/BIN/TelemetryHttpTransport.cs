@@ -8,7 +8,7 @@ namespace BIN;
 
 public static class TelemetryHttpTransport
 {
-	private const string Endpoint = "https://mcp-revit-api.thuongdang531.workers.dev/";
+	private const string Endpoint = "https://mcp-revit-api.thuongdang531.workers.dev/api/telemetry/batch";
 	private const string ApiKey = "bin_revit_ingest_secret_2026";
 
 	// Legacy callers now join the same bounded batch outbox as all other telemetry.
@@ -17,30 +17,17 @@ public static class TelemetryHttpTransport
 		if (!string.IsNullOrWhiteSpace(jsonPayload)) TelemetryBatchDispatcher.TryEnqueue(jsonPayload);
 	}
 
-	// The factory executes away from the Revit API thread, then joins the bounded outbox.
-	public static void PostJsonAsync(Func<string> jsonPayloadFactory)
-	{
-		if (jsonPayloadFactory == null) return;
-		try
-		{
-			ThreadPool.QueueUserWorkItem(_ =>
-			{
-				try { PostJsonAsync(jsonPayloadFactory()); }
-				catch { }
-			});
-		}
-		catch { }
-	}
+	public static Task<bool> PostBatchAsync(byte[] payload, bool isGzip) => PostBatchToEndpointAsync(payload, isGzip, Endpoint);
 
-	public static async Task PostBatchAsync(byte[] payload, bool isGzip)
+	internal static async Task<bool> PostBatchToEndpointAsync(byte[] payload, bool isGzip, string endpoint)
 	{
-		if (payload == null || payload.Length == 0) return;
+		if (payload == null || payload.Length == 0) return true;
 		try
 		{
 			try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
 			try { ServicePointManager.SecurityProtocol |= (SecurityProtocolType)12288; } catch { }
 #pragma warning disable SYSLIB0014 // HttpWebRequest keeps net48 and net8 implementations identical.
-			HttpWebRequest request = (HttpWebRequest)WebRequest.Create(Endpoint);
+			HttpWebRequest request = (HttpWebRequest)WebRequest.Create(endpoint);
 #pragma warning restore SYSLIB0014
 			request.Headers["X-API-Key"] = ApiKey;
 			if (isGzip) request.Headers["Content-Encoding"] = "gzip";
@@ -56,16 +43,22 @@ public static class TelemetryHttpTransport
 			request.Timeout = 3000;
 			request.ReadWriteTimeout = 3000;
 			request.ContentLength = payload.Length;
-			using (Stream stream = await request.GetRequestStreamAsync().ConfigureAwait(false))
+			// Timeout/ReadWriteTimeout do not bound the async API: abort the request on deadline.
+			using (var deadline = new Timer(_ => { try { request.Abort(); } catch { } }, null, 5000, Timeout.Infinite))
 			{
-				await stream.WriteAsync(payload, 0, payload.Length).ConfigureAwait(false);
+				using (Stream stream = await request.GetRequestStreamAsync().ConfigureAwait(false))
+				{
+					await stream.WriteAsync(payload, 0, payload.Length).ConfigureAwait(false);
+				}
+				using (WebResponse response = await request.GetResponseAsync().ConfigureAwait(false)) { }
 			}
-			using (WebResponse response = await request.GetResponseAsync().ConfigureAwait(false)) { }
+			return true;
 		}
 		catch (WebException wex)
 		{
 			try { if (wex.Response != null) wex.Response.Dispose(); } catch { }
 		}
 		catch { }
+		return false;
 	}
 }

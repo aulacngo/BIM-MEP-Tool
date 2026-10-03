@@ -35,6 +35,7 @@ public abstract class DevCommandProxy : IExternalCommand
 		string className = DevCommandRegistry.Get(CommandKey);
 		string assemblyPath = null;
 		Stopwatch commandTimer = Stopwatch.StartNew();
+		IDisposable telemetryScope = CommandDiagnostics.BeginCommand(className ?? CommandKey);
 		try
 		{
 			if (string.IsNullOrWhiteSpace(className))
@@ -70,6 +71,7 @@ public abstract class DevCommandProxy : IExternalCommand
 			TaskDialog.Show("BIM TOOL - " + (className ?? CommandKey), actual.Message + "\n\nChi tiết đã được ghi vào diagnostics.");
 			return Result.Cancelled;
 		}
+		finally { telemetryScope.Dispose(); }
 	}
 
 	private static string GetDevelopmentAssemblyPath()

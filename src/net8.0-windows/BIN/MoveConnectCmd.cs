@@ -367,17 +367,8 @@ public class MoveConnectCmd : IExternalCommand
 
 	private static void EmitCandidateTelemetry(string outcome, string diagnosticJson)
 	{
-		try
-		{
-			JObject details = JObject.Parse(diagnosticJson);
-			string reasonCode = (string)details["reason"] ?? "UNEXPECTED_ERROR";
-			JObject target = details["target"] as JObject;
-			JObject source = details["source"] as JObject;
-			if (target != null) target.Remove("name");
-			if (source != null) source.Remove("name");
-			CommandDiagnostics.WriteL2Json("MoveConnect", outcome, reasonCode, details.ToString(Formatting.None));
-		}
-		catch { }
+		// Parsing, name removal and reason extraction happen on the telemetry worker.
+		CommandDiagnostics.WriteL2Json("MoveConnect", outcome, null, diagnosticJson);
 	}
 
 	private static void Rollback(Transaction transaction)

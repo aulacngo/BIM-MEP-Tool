@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFrameworks>net48;net8.0</TargetFrameworks>
+    <LangVersion>12.0</LangVersion>
+    <TelemetrySourceTarget Condition="'$(TargetFramework)' == 'net48'">net48</TelemetrySourceTarget>
+    <TelemetrySourceTarget Condition="'$(TargetFramework)' == 'net8.0'">net8.0-windows</TelemetrySourceTarget>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../src/$(TelemetrySourceTarget)/BIN/TelemetryHttpTransport.cs" Link="TelemetryHttpTransport.cs" Condition="'$(TelemetrySourceTarget)' != ''" />
+  </ItemGroup>
+</Project>

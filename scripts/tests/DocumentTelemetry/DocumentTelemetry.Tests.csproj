@@ -4,6 +4,7 @@
     <TargetFrameworks>net48;net8.0</TargetFrameworks>
     <LangVersion>12.0</LangVersion>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DefineConstants>$(DefineConstants);TELEMETRY_TEST</DefineConstants>
     <TelemetrySourceTarget Condition="'$(TargetFramework)' == 'net48'">net48</TelemetrySourceTarget>
     <TelemetrySourceTarget Condition="'$(TargetFramework)' == 'net8.0'">net8.0-windows</TelemetrySourceTarget>
   </PropertyGroup>
@@ -11,7 +12,9 @@
     <Compile Include="Program.cs" />
     <Compile Include="RevitTestDoubles.cs" />
     <Compile Include="../../../src/$(TelemetrySourceTarget)/BIN/DocumentTelemetryTracker.cs" Link="DocumentTelemetryTracker.cs" Condition="'$(TelemetrySourceTarget)' != ''" />
-    <Compile Include="../../../src/$(TelemetrySourceTarget)/BIN/TelemetryHttpTransport.cs" Link="TelemetryHttpTransport.cs" Condition="'$(TelemetrySourceTarget)' != ''" />
+    <Compile Include="TransportDouble.cs" />
+    <Compile Include="../../../src/$(TelemetrySourceTarget)/BIN/TelemetryBatchDispatcher.cs" Link="TelemetryBatchDispatcher.cs" Condition="'$(TelemetrySourceTarget)' != ''" />
+    <Compile Include="../../../src/$(TelemetrySourceTarget)/BIN/CommandDiagnostics.cs" Link="CommandDiagnostics.cs" Condition="'$(TelemetrySourceTarget)' != ''" />
     <Reference Include="Newtonsoft.Json">
       <HintPath>../../../BIN.bundle (2)/BIN.bundle/Contents/net48/Newtonsoft.Json.dll</HintPath>
     </Reference>

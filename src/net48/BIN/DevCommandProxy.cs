@@ -12,8 +12,16 @@ namespace BIN;
 public static class DevCommandRegistry
 {
 	private static readonly Dictionary<string, string> Commands = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-	public static void Register(string key, string className) { Commands[key] = className; }
-	public static string Get(string key) { return Commands.TryGetValue(key, out string className) ? className : null; }
+
+	public static void Register(string key, string className)
+	{
+		Commands[key] = className;
+	}
+
+	public static string Get(string key)
+	{
+		return Commands.TryGetValue(key, out string className) ? className : null;
+	}
 }
 
 [Transaction(TransactionMode.Manual)]
@@ -21,20 +29,34 @@ public static class DevCommandRegistry
 public abstract class DevCommandProxy : IExternalCommand
 {
 	protected abstract string CommandKey { get; }
+
 	public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
 	{
 		string className = DevCommandRegistry.Get(CommandKey);
 		string assemblyPath = null;
 		Stopwatch commandTimer = Stopwatch.StartNew();
+		IDisposable telemetryScope = CommandDiagnostics.BeginCommand(className ?? CommandKey);
 		try
 		{
-			if (string.IsNullOrWhiteSpace(className)) throw new InvalidOperationException("Command is not registered: " + CommandKey);
+			if (string.IsNullOrWhiteSpace(className))
+			{
+				throw new InvalidOperationException("Command is not registered: " + CommandKey);
+			}
+
 			assemblyPath = GetDevelopmentAssemblyPath();
 			Assembly assembly = Assembly.GetExecutingAssembly();
-			if (!string.IsNullOrWhiteSpace(assemblyPath) && File.Exists(assemblyPath)) assembly = Assembly.Load(File.ReadAllBytes(assemblyPath));
+			if (!string.IsNullOrWhiteSpace(assemblyPath) && File.Exists(assemblyPath))
+			{
+				assembly = Assembly.Load(File.ReadAllBytes(assemblyPath));
+			}
+
 			CommandDiagnostics.Write(className, "started", commandData, assemblyPath: assemblyPath ?? assembly.Location);
 			Type commandType = assembly.GetType("BIN." + className, false);
-			if (commandType == null || !typeof(IExternalCommand).IsAssignableFrom(commandType)) throw new InvalidOperationException("Cannot find IExternalCommand BIN." + className + " in " + (assemblyPath ?? assembly.Location));
+			if (commandType == null || !typeof(IExternalCommand).IsAssignableFrom(commandType))
+			{
+				throw new InvalidOperationException("Cannot find IExternalCommand BIN." + className + " in " + (assemblyPath ?? assembly.Location));
+			}
+
 			IExternalCommand command = (IExternalCommand)Activator.CreateInstance(commandType);
 			Result result = command.Execute(commandData, ref message, elements);
 			CommandDiagnostics.Write(className, result == Result.Failed ? "failed" : "completed", commandData, result, message,
@@ -49,14 +71,22 @@ public abstract class DevCommandProxy : IExternalCommand
 			TaskDialog.Show("BIM TOOL - " + (className ?? CommandKey), actual.Message + "\n\nChi tiết đã được ghi vào diagnostics.");
 			return Result.Cancelled;
 		}
+		finally { telemetryScope.Dispose(); }
 	}
+
 	private static string GetDevelopmentAssemblyPath()
 	{
+		string configName =
+#if NET8_0_OR_GREATER
+			"hotreload-net8.path";
+#else
+			"hotreload-net48.path";
+#endif
 		string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-		string configPath = Path.Combine(localAppData, "BIM TOOL", "Development", "hotreload-net48.path");
+		string configPath = Path.Combine(localAppData, "BIM TOOL", "Development", configName);
 		if (!File.Exists(configPath))
 		{
-			configPath = Path.Combine(localAppData, "BIN TOOL", "Development", "hotreload-net48.path");
+			configPath = Path.Combine(localAppData, "BIN TOOL", "Development", configName);
 		}
 		if (!File.Exists(configPath)) return null;
 		string path = File.ReadAllText(configPath).Trim().Trim('"');
@@ -118,7 +148,7 @@ public abstract class DevCommandProxy : IExternalCommand
 [Transaction(TransactionMode.Manual)] [Regeneration(RegenerationOption.Manual)] public class DevProxy_ElbowRight : DevCommandProxy { protected override string CommandKey => "ElbowRight"; }
 [Transaction(TransactionMode.Manual)] [Regeneration(RegenerationOption.Manual)] public class DevProxy_ElbowLeft45 : DevCommandProxy { protected override string CommandKey => "ElbowLeft45"; }
 [Transaction(TransactionMode.Manual)] [Regeneration(RegenerationOption.Manual)] public class DevProxy_ElbowRight45 : DevCommandProxy { protected override string CommandKey => "ElbowRight45"; }
-[Transaction(TransactionMode.Manual)] [Regeneration(RegenerationOption.Manual)] [Transaction(TransactionMode.Manual)] [Regeneration(RegenerationOption.Manual)] public class DevProxy_AvoidClash : DevCommandProxy { protected override string CommandKey => "AvoidClash"; }
+[Transaction(TransactionMode.Manual)] [Regeneration(RegenerationOption.Manual)] public class DevProxy_AvoidClash : DevCommandProxy { protected override string CommandKey => "AvoidClash"; }
 [Transaction(TransactionMode.Manual)] [Regeneration(RegenerationOption.Manual)] public class DevProxy_RotateElements : DevCommandProxy { protected override string CommandKey => "RotateElements"; }
 [Transaction(TransactionMode.Manual)] [Regeneration(RegenerationOption.Manual)] public class DevProxy_RotateMulti : DevCommandProxy { protected override string CommandKey => "RotateMulti"; }
 [Transaction(TransactionMode.Manual)] [Regeneration(RegenerationOption.Manual)] public class DevProxy_DeleteSystem : DevCommandProxy { protected override string CommandKey => "DeleteSystem"; }

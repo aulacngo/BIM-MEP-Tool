@@ -76,3 +76,10 @@ CREATE TABLE IF NOT EXISTS hourly_rollups (
 );
 
 CREATE INDEX IF NOT EXISTS ix_hourly_rollups_tool_time ON hourly_rollups(tool_id, hour_utc);
+
+-- Additive V2+ migration. Safe on existing databases; no new columns required.
+-- Old events without correlation remain valid; do not guess their invocation identity.
+CREATE INDEX IF NOT EXISTS ix_events_l1_correlation
+  ON events_l1(json_extract(event_json, '$.correlation_id')) WHERE json_valid(event_json);
+CREATE INDEX IF NOT EXISTS ix_events_l2_correlation
+  ON events_l2(json_extract(event_json, '$.correlation_id')) WHERE json_valid(event_json);

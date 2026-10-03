@@ -1,56 +1,50 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
+using System.Threading.Tasks;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Events;
+using Autodesk.Revit.UI;
 using BIN;
 using Newtonsoft.Json.Linq;
 
 internal static class Program
 {
-	private static int _passed;
-	private static void Main()
+	private static int passed;
+	private static readonly List<JObject> Fixtures = new List<JObject>();
+	private static object[] Shared => (object[])typeof(TelemetryBatchDispatcher).GetField("Shared", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null);
+	private static int[] Counters => (int[])Shared[2];
+	private static Queue<object[]> Queue => (Queue<object[]>)Shared[1];
+	private static void Main(string[] args)
 	{
 		ApiThread.Check();
-		Run("family, empty and ephemeral events", Filters);
-		Run("five-lookups limit and conservative view filtering", Sampling);
-		Run("delete metadata, API failures and JSON escaping", Metadata);
-		Run("burst accumulation and document/view/undo separation", Batching);
-		Run("pending work and metadata remain bounded", Bounds);
-		Run("single sender, real rate limit, failure recovery and shutdown", Dispatch);
-		Run("idempotent startup and stopped handler", Lifecycle);
-		Assert(ApiThread.Violations == 0, "No Revit API calls from workers");
-		Console.WriteLine($"PASS: {_passed} scenarios; no network requests; API thread violations: {ApiThread.Violations}");
+		((Timer)Shared[3]).Change(Timeout.Infinite, Timeout.Infinite);
+		Counters[1] = 1; // Freeze the sender for deterministic admission/capture tests.
+		DocumentTelemetryTracker.Start();
+		Run("V2 document contract, bounded samples, rollback and origin", DocumentContract);
+		Run("L1/L2 correlation, selection, exception, immutable primitive capture", Correlation);
+		Run("hot-loaded assemblies share scope, session, sequence and one outbox", HotLoad);
+		Run("drop oldest, byte cap, rejection, no UI wait, retained memory", Bounds);
+		Run("single async sender, gzip, serialization isolation and slow/offline delivery", Sender);
+		Run("synthetic callback latency distribution (not Revit proof)", Latency);
+		Assert(ApiThread.Violations == 0, "No Revit API use on worker");
+		if (args.Length > 0) File.WriteAllText(args[0], new JArray(Fixtures).ToString(Newtonsoft.Json.Formatting.None));
+		Console.WriteLine($"PASS: {passed} scenarios; API thread violations={ApiThread.Violations}; network requests=0");
+		DocumentTelemetryTracker.Stop();
 	}
-
-	private static void Run(string name, Action action)
+	private static void Run(string name, Action action) { Clear(); action(); passed++; Console.WriteLine("PASS " + name); }
+	private static void Assert(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
+	private static void Clear() { lock (Shared[0]) { Queue.Clear(); Counters[0] = 0; } }
+	private static List<JObject> Drain()
 	{
-		action();
-		_passed++;
-		Console.WriteLine("PASS " + name);
+		var callbacks = new List<Func<string>>();
+		lock (Shared[0]) { while (Queue.Count > 0) callbacks.Add((Func<string>)Queue.Dequeue()[1]); Counters[0] = 0; }
+		return Task.Run(() => callbacks.Select(f => f()).Where(s => s != null).Select(JObject.Parse).ToList()).GetAwaiter().GetResult();
 	}
-
-	private static void Assert(bool condition, string message)
-	{
-		if (!condition) throw new InvalidOperationException(message);
-	}
-
-	private static FieldInfo Field(Type type, string name) => type.GetField(name, BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
-
-	private static DocumentTelemetryTracker.Dispatcher Capture()
-	{
-		var dispatcher = new DocumentTelemetryTracker.Dispatcher(_ => throw new InvalidOperationException("Unexpected send in capture mode"));
-		((Timer)Field(dispatcher.GetType(), "_timer").GetValue(dispatcher)).Change(Timeout.Infinite, Timeout.Infinite);
-		Field(typeof(DocumentTelemetryTracker), "_dispatcher").SetValue(null, dispatcher);
-		return dispatcher;
-	}
-
-	private static List<DocumentTelemetryTracker.Snapshot> Pending(DocumentTelemetryTracker.Dispatcher dispatcher)
-		=> (List<DocumentTelemetryTracker.Snapshot>)Field(dispatcher.GetType(), "_pending").GetValue(dispatcher);
-
 	private static DocumentChangedEventArgs Change(Document doc = null, int added = 0, int deleted = 0, int modified = 0, string name = "Draw pipes")
 	{
 		var e = new DocumentChangedEventArgs { Document = doc ?? new Document(), Names = new List<string> { name } };
@@ -60,182 +54,174 @@ internal static class Program
 		for (int i = 0; i < deleted; i++, id++) e.Deleted.Add(new ElementId(id));
 		return e;
 	}
-
 	private static void Fire(DocumentChangedEventArgs e) => DocumentTelemetryTracker.OnDocumentChanged(null, e);
-
-	private static void Filters()
+	private static void DocumentContract()
 	{
-		using (var dispatcher = Capture())
-		{
-			Fire(null);
-			Fire(Change(new Document { Family = true }, added: 1));
-			Fire(Change());
-			Fire(Change(deleted: 1, name: "  "));
-			Fire(Change(modified: 1, name: "Reset Temporary Hide/Isolate"));
-			Fire(Change(modified: 1, name: " pan "));
-			Assert(Pending(dispatcher).Count == 0, "Noise must be ignored");
-			Fire(Change(added: 1, name: "Create View"));
-			Fire(Change(modified: 1, name: "Internal pipe parameter"));
-			var mixed = Change(added: 1, name: "Zoom");
-			mixed.Names.Add("Place family");
-			Fire(mixed);
-			Assert(Pending(dispatcher).Count == 3, "Broad name filters must not drop meaningful work");
-		}
+		Fire(null);
+		Fire(Change(new Document { Family = true }, added: 1));
+		Fire(Change());
+		Fire(Change(modified: 1, name: "Pan"));
+		Assert(Queue.Count == 0, "Family, empty, exact ephemeral events ignored");
+		var big = Change(added: 40, modified: 40);
+		Fire(big);
+		Assert(big.Document.Lookups <= 5, "At most five lookups across all changed IDs");
+		var data = Drain().Single();
+		Assert((string)data["tier"] == "L1" && (string)data["event_type"] == "document.changed", "V2 contract");
+		Assert((int)data["context"]["added_count"] == 40 && (int)data["context"]["modified_count"] == 40, "Exact counts");
+		Assert((string)data["context"]["origin"] == "user_or_other_addin", "No guessed user origin");
+		Assert(!(bool)data["quality"]["categories_complete"], "Sample disclosed");
+		Fixtures.Add(data);
+		var rollback = Change(); rollback.Kind = UndoOperation.TransactionRolledBack;
+		Fire(rollback);
+		Assert((string)Drain().Single()["context"]["transaction_state"] == "RolledBack", "Zero-ID rollback retained");
+		var deleted = Change(deleted: 10);
+		deleted.Kind = UndoOperation.TransactionUndone;
+		Fire(deleted);
+		var undo = Drain().Single();
+		Assert((string)undo["context"]["transaction_state"] == "Undone" && deleted.Document.Lookups == 0, "Undo/deleted evidence");
+		Fixtures.Add(undo);
+		var inaccessible = Change(modified: 1);
+		inaccessible.Document.ThrowElement = true;
+		Fire(inaccessible);
+		Assert((int)Drain().Single()["context"]["modified_count"] == 1, "Failed category lookup preserves event counts");
+		var manyNames = Change(added: 1);
+		manyNames.Names = Enumerable.Range(0, 1000).Select(i => new string('x', 1024)).ToList();
+		Fire(manyNames);
+		Assert(Drain().Single()["context"]["transactions"].Count() == 8, "Transaction metadata bounded");
+		DocumentTelemetryTracker.Stop();
+		Fire(Change(added: 1));
+		Assert(Queue.Count == 0, "Stopped hook inert");
+		DocumentTelemetryTracker.Start();
 	}
-
-	private static void Sampling()
+	private static void Correlation()
 	{
-		using (var dispatcher = Capture())
+		var data = new ExternalCommandData();
+		for (int i = 1; i <= 40; i++) data.Application.ActiveUIDocument.Selection.Ids.Add(new ElementId(i));
+		string correlation;
+		using (CommandDiagnostics.BeginCommand("MoveConnect"))
 		{
-			var large = Change(added: 20, modified: 20);
-			Fire(large);
-			Assert(large.Document.Lookups == 5, "Five lookups TOTAL across added and modified");
-			var views = Change(modified: 5, name: "View state");
-			foreach (ElementId id in views.Modified) views.Document.Elements[id.Value] = new View();
-			Fire(views);
-			Assert(Pending(dispatcher).Count == 1, "Known view-only modification must be ignored");
-			var mixed = Change(modified: 6);
-			foreach (ElementId id in mixed.Modified.Take(5)) mixed.Document.Elements[id.Value] = new View();
-			Fire(mixed);
-			Assert(Pending(dispatcher).Count == 2 && mixed.Document.Lookups == 5, "Partial sample must not reject model edits");
-			var failed = Change(modified: 1);
-			failed.Document.ThrowElement = true;
-			Fire(failed);
-			Assert(Pending(dispatcher).Count == 3, "Failed category lookup must preserve counts");
+			correlation = CommandDiagnostics.CurrentInvocation[0];
+			using (CommandDiagnostics.BeginCommand("Nested")) Assert(CommandDiagnostics.CurrentInvocation[0] != correlation, "Nested invocation unique");
+			Assert(CommandDiagnostics.CurrentInvocation[0] == correlation, "Outer scope restored");
+			CommandDiagnostics.WriteL2("MoveConnect", "failed", "NO_CONNECTOR", new { count = 2, unsafe_object = data.Application.ActiveUIDocument.Document });
+			var changed = Change(added: 3); Fire(changed);
+			Exception error;
+			try { ThrowTestError(); throw new Exception("unreachable"); } catch (InvalidOperationException e) { error = e; }
+			CommandDiagnostics.Write("MoveConnect", "failed", data, Result.Failed, "missing connector", error, durationMilliseconds: 123);
 		}
+		Assert(CommandDiagnostics.CurrentInvocation == null, "Scope cleared even after command");
+		data.Application.ActiveUIDocument.Document.DocumentTitle = "MUTATED AFTER CAPTURE";
+		var events = Drain();
+		Assert(events.Count == 4 && events.All(e => (string)e["correlation_id"] == correlation), "Same invocation on all detail/document/terminal events");
+		JObject terminal = events.Single(e => (string)e["event_type"] == "command.terminal");
+		Assert((int)terminal["context"]["selection_count"] == 40 && terminal["context"]["selected_element_ids"].Count() == 8, "Bounded selection sample");
+		Assert((string)terminal["context"]["transaction_state"] == "Committed", "Failed command does not imply rollback");
+		Assert(events.Where(e => (string)e["tier"] == "L2").All(e => (string)e["parent_event_id"] == (string)terminal["event_id"]), "L2 parent ID is exact terminal ID");
+		Assert((bool)events[0]["quality"]["details_truncated_or_unsupported"], "Nonprimitive reference rejected");
+		Assert(events.Any(e => e["details"]?["stack_trace"]?.ToString().Contains("ThrowTestError") == true), "Exception stack captured");
+		Fixtures.AddRange(events);
+		data.Application.ActiveUIDocument.Document.ThrowView = true;
+		CommandDiagnostics.Write("MoveConnect", "failed", data, Result.Failed);
+		Assert((bool)Drain().Single()["quality"]["context_incomplete"], "Broken optional API metadata does not erase terminal event");
+		CommandDiagnostics.WriteL2Json("MoveConnect", "failed", "BAD_JSON", "{");
+		Assert((bool)Drain().Single()["details"]["parse_error"], "Malformed L2 details isolated before batching");
+		CommandDiagnostics.WriteL2Json("MoveConnect", "failed", null, "{\"reason\":\"NO_CONNECTOR\",\"source\":{\"name\":\"private\",\"id\":12}}");
+		var sanitized = Drain().Single();
+		Assert((string)sanitized["command"]["reason_code"] == "NO_CONNECTOR" && sanitized["details"]["source"]["name"] == null, "MoveConnect sanitizing/reason extraction moved to worker");
 	}
-
-	private static void Metadata()
+	[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+	private static void ThrowTestError() => throw new InvalidOperationException("test exception");
+	private static void HotLoad()
 	{
-		using (var dispatcher = Capture())
+		Assembly copy = Assembly.Load(File.ReadAllBytes(typeof(Program).Assembly.Location));
+		Type diagnostics = copy.GetType("BIN.CommandDiagnostics");
+		using (CommandDiagnostics.BeginCommand("MoveConnect"))
 		{
-			var e = Change(deleted: 5, name: "Delete \"pipes\"\nLevel 1");
-			e.Document.DocumentTitle = "Dự án \"A\"";
-			e.Document.App.User = null;
-			e.Document.ThrowView = true;
-			Fire(e);
-			JObject json = JObject.Parse(Pending(dispatcher).Single().ToJson());
-			Assert((string)json["project_name"] == e.Document.DocumentTitle, "JSON preserves Unicode and escapes");
-			Assert((string)json["user_name"] == Environment.UserName, "Username fallback");
-			Assert((string)json["command_name"] == "DocumentChanged: Delete", "Delete label");
-			Assert((int)json["details"]["deleted_count"] == 5, "Deleted count");
-			Assert((string)json["details"]["view"] == "", "ActiveView failure is isolated");
-			Assert(!json["details"]["categories"].Any() && e.Document.Lookups == 0, "No lookup of deleted elements");
+			var foreignScope = (string[])diagnostics.GetProperty("CurrentInvocation", BindingFlags.NonPublic | BindingFlags.Static).GetValue(null);
+			Assert(foreignScope[0] == CommandDiagnostics.CurrentInvocation[0], "Primitive correlation crosses assembly boundary");
+			diagnostics.GetMethod("WriteL2Json").Invoke(null, new object[] { "MoveConnect", "succeeded", "HOTLOAD", "{}" });
+			Assert(Queue.Count == 1, "Hotloaded copy uses original queue");
+			CommandDiagnostics.Write("MoveConnect", "completed", null, Result.Succeeded);
 		}
+		var events = Drain();
+		Assert(events.Count == 2 && (string)events[0]["client"]["session_id"] == (string)events[1]["client"]["session_id"], "Shared session");
+		Assert((long)events[0]["client"]["sequence"] < (long)events[1]["client"]["sequence"], "Shared monotonically increasing sequence");
+		Fixtures.AddRange(events);
 	}
-
-	private static void Batching()
-	{
-		using (var dispatcher = Capture())
-		{
-			var doc = new Document();
-			for (int i = 0; i < 100; i++) Fire(Change(doc, added: 1, deleted: 2, modified: 3));
-			var batch = Pending(dispatcher).Single();
-			Assert(batch.AddedCount == 100 && batch.DeletedCount == 200 && batch.ModifiedCount == 300 && batch.EventCount == 100, "No lost counts in bursts");
-			Fire(Change(added: 1)); // Same title, separate document instance.
-			doc.CurrentView.ViewName = "Level 2";
-			Fire(Change(doc, added: 1));
-			var undo = Change(doc, deleted: 1);
-			undo.Kind = UndoOperation.TransactionUndone;
-			Fire(undo);
-			Assert(Pending(dispatcher).Count == 4, "Separate document, view and undo contexts");
-		}
-	}
-
 	private static void Bounds()
 	{
-		using (var dispatcher = Capture())
+		for (int i = 0; i < 300; i++) TelemetryBatchDispatcher.TryEnqueue("{\"index\":" + i + "}");
+		Assert(Queue.Count == 200, "200 snapshot hard cap");
+		var rows = Drain();
+		Assert((int)rows.First()["index"] == 100 && (int)rows.Last()["index"] == 299, "Oldest evicted, latest retained in order");
+		long before = GC.GetTotalMemory(true);
+		for (int i = 0; i < 1000; i++) TelemetryBatchDispatcher.TryEnqueue("{\"index\":" + i + ",\"x\":\"" + new string('x', 8000) + "\"}");
+		long retained = GC.GetTotalMemory(true) - before;
+		Assert(Queue.Count < 200 && TelemetryBatchDispatcher.QueuedBytes <= 2 * 1024 * 1024, "Byte limit evicts before count cap");
+		Assert(retained < 3 * 1024 * 1024, "Synthetic retained managed memory under 3 MiB");
+		Console.WriteLine($"Retained heap delta={retained} bytes; accounted outbox={TelemetryBatchDispatcher.QueuedBytes}; items={Queue.Count}");
+		Clear();
+		Assert(!TelemetryBatchDispatcher.TryEnqueue(new string('x', 8193)), "Oversized raw input rejected");
+		using (var held = new ManualResetEventSlim())
+		using (var release = new ManualResetEventSlim())
 		{
-			var doc = new Document();
-			for (int i = 0; i < 100; i++)
-			{
-				var e = Change(doc, added: 1, name: i + new string('x', 2000));
-				e.Document.Elements[1].ElementCategory.CategoryName = "Category " + i;
-				Fire(e);
-			}
-			var batch = Pending(dispatcher).Single();
-			Assert(batch.Transactions.Count == 16 && batch.Transactions.All(n => n.Length <= 1024) && batch.Categories.Count == 5, "Bounded metadata");
-			for (int i = 0; i < 100; i++) Fire(Change(added: 1));
-			Assert(Pending(dispatcher).Count == 32, "Bounded pending contexts");
-			Fire(Change(doc, deleted: 1));
-			Assert(batch.DeletedCount == 1, "Existing batches still merge at capacity");
+			Task other = Task.Run(() => { lock (Shared[0]) { held.Set(); release.Wait(5000); } });
+			Assert(held.Wait(5000), "Lock holder ready");
+			var timer = Stopwatch.StartNew();
+			Assert(!TelemetryBatchDispatcher.TryEnqueue("{}"), "Contended enqueue returns immediately");
+			Assert(timer.ElapsedMilliseconds < 100, "No UI lock wait");
+			release.Set(); other.GetAwaiter().GetResult();
 		}
+		Parallel.For(0, 8, p => { for (int i = 0; i < 1000; i++) TelemetryBatchDispatcher.TryEnqueue("{\"p\":" + p + "}"); });
+		Assert(Queue.Count <= 200 && Counters[0] >= 0 && Counters[0] <= TelemetryBatchDispatcher.MaxQueuedBytes, "Concurrent admission remains bounded");
 	}
-
-	private static DocumentTelemetryTracker.Snapshot Batch(string key) => new DocumentTelemetryTracker.Snapshot
+	private static void Sender()
 	{
-		DocumentKey = key, ProjectName = key, UserName = "test", ViewName = "Level 1", Operation = "TransactionCommitted",
-		AddedCount = 1, EventCount = 1, Categories = new List<string> { "Pipes" }, Transactions = new List<string> { "Draw pipes" }
-	};
-
-	private static void Dispatch()
-	{
-		using (var firstStarted = new ManualResetEventSlim())
-		using (var releaseFirst = new ManualResetEventSlim())
-		using (var secondFinished = new ManualResetEventSlim())
-		using (var thirdFinished = new ManualResetEventSlim())
+		Counters[1] = 0;
+		var release = new TaskCompletionSource<bool>();
+		using (var entered = new ManualResetEventSlim())
 		{
-			int calls = 0, active = 0, maximumActive = 0;
-			long firstTick = 0, secondTick = 0, thirdTick = 0;
-			var dispatcher = new DocumentTelemetryTracker.Dispatcher(batch =>
-			{
-				int count = Interlocked.Increment(ref calls);
-				maximumActive = Math.Max(maximumActive, Interlocked.Increment(ref active));
-				try
-				{
-					Assert(Thread.CurrentThread.ManagedThreadId != ApiThread.Main, "Send must run on a worker");
-					JObject.Parse(batch.ToJson());
-					if (count == 1)
-					{
-						firstTick = Stopwatch.GetTimestamp();
-						firstStarted.Set();
-						if (!releaseFirst.Wait(10000)) throw new TimeoutException();
-						throw new InvalidOperationException("Simulated network failure");
-					}
-					if (count == 2)
-					{
-						Assert(batch.EventCount == 1000 && batch.AddedCount == 1000, "Accumulate changes during slow HTTP");
-						secondTick = Stopwatch.GetTimestamp();
-						secondFinished.Set();
-					}
-					if (count == 3) { thirdTick = Stopwatch.GetTimestamp(); thirdFinished.Set(); }
-				}
-				finally { Interlocked.Decrement(ref active); }
-			});
-			try
-			{
-				dispatcher.Add(Batch("A"));
-				Assert(firstStarted.Wait(5000), "First dispatch timeout");
-				var watch = Stopwatch.StartNew();
-				for (int i = 0; i < 1000; i++) dispatcher.Add(Batch("B"));
-				Assert(watch.ElapsedMilliseconds < 1000, "Adding during slow HTTP must not wait for HTTP");
-				Assert(!secondFinished.Wait(1200), "Slow first sender must prevent overlapping sends");
-				releaseFirst.Set();
-				Assert(secondFinished.Wait(5000), "A failed sender must not wedge the queue");
-				dispatcher.Add(Batch("C"));
-				Assert(thirdFinished.Wait(5000), "Third dispatch timeout");
-				Assert(maximumActive == 1 && secondTick - firstTick >= Stopwatch.Frequency && thirdTick - secondTick >= Stopwatch.Frequency, "Single sender and minimum one-second interval");
-				dispatcher.Add(Batch("D"));
-				dispatcher.Dispose();
-				dispatcher.Add(Batch("E"));
-				Assert(!SpinWait.SpinUntil(() => Volatile.Read(ref calls) > 3, 1200), "No queued or later sends after shutdown");
-				Assert(Pending(dispatcher).Count == 0, "Shutdown clears pending work");
-			}
-			finally { releaseFirst.Set(); dispatcher.Dispose(); DocumentTelemetryTracker.Stop(); }
+			TelemetryHttpTransport.Send = events => { entered.Set(); return release.Task; };
+			for (int i = 0; i < 5; i++) TelemetryBatchDispatcher.TryEnqueue("{\"n\":" + i + ",\"text\":\"" + new string('a', 300) + "\"}");
+			Assert(entered.Wait(5000), "Gzip batch reached background transport");
+			int calls = TelemetryHttpTransport.Calls;
+			for (int i = 0; i < 500; i++) TelemetryBatchDispatcher.TryEnqueue("{\"n\":" + i + "}");
+			Assert(TelemetryHttpTransport.Calls == calls && Queue.Count == 200, "Slow network: one in flight, latest 200 queued");
+			Clear();
+			TelemetryHttpTransport.Send = _ => Task.FromResult(true);
+			release.SetResult(false);
+			Assert(SpinWait.SpinUntil(() => Volatile.Read(ref Counters[1]) == 0, 5000), "Failed transport releases consumer");
+			Assert(TelemetryBatchDispatcher.FailedDeliveryCount >= 5, "Unacknowledged deliveries counted");
 		}
+		using (var received = new ManualResetEventSlim())
+		{
+			int rows = 0;
+			TelemetryHttpTransport.Send = events => { rows += events.Count; received.Set(); return Task.FromResult(true); };
+			Counters[1] = 1;
+			TelemetryBatchDispatcher.TryEnqueue("{ malformed");
+			for (int i = 0; i < 4; i++) TelemetryBatchDispatcher.TryEnqueue("{\"good\":" + i + "}");
+			Counters[1] = 0;
+			((Action)Shared[4])();
+			Assert(received.Wait(5000), "Healthy items delivered after bad serializer");
+			Assert(SpinWait.SpinUntil(() => Volatile.Read(ref Counters[1]) == 0, 5000), "Consumer idle");
+			Assert(rows == 4 && TelemetryHttpTransport.MaximumActive == 1, "Only invalid item dropped; single sender");
+		}
+		Counters[1] = 1;
 	}
-
-	private static void Lifecycle()
+	private static void Latency()
 	{
-		DocumentTelemetryTracker.Start();
-		object first = Field(typeof(DocumentTelemetryTracker), "_dispatcher").GetValue(null);
-		Assert(first != null, "Startup creates dispatcher");
-		DocumentTelemetryTracker.Start();
-		Assert(ReferenceEquals(first, Field(typeof(DocumentTelemetryTracker), "_dispatcher").GetValue(null)), "Repeated startup keeps one sender");
-		DocumentTelemetryTracker.Stop();
-		DocumentTelemetryTracker.Stop();
-		var e = Change(added: 1);
-		Fire(e);
-		Assert(e.Document.Lookups == 0 && Field(typeof(DocumentTelemetryTracker), "_dispatcher").GetValue(null) == null, "Stopped handler is inert");
+		var change = Change(added: 30, modified: 30);
+		for (int i = 0; i < 200; i++) Fire(change);
+		Clear();
+		var samples = new double[10000];
+		for (int i = 0; i < samples.Length; i++)
+		{
+			long start = Stopwatch.GetTimestamp(); Fire(change);
+			samples[i] = (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency;
+		}
+		Array.Sort(samples);
+		Console.WriteLine($"STUB DocumentChanged ms: P50={samples[5000]:F4}; P95={samples[9500]:F4}; P99={samples[9900]:F4}; Max={samples[9999]:F4}");
+		Assert(Queue.Count <= 200, "Burst still bounded");
+		Clear();
 	}
 }

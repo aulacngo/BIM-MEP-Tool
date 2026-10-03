@@ -20,11 +20,13 @@ namespace Autodesk.Revit.DB
 	{
 		internal readonly int Value;
 		internal ElementId(int value) { Value = value; }
+		public int IntegerValue { get { ApiThread.Check(); return Value; } }
 	}
 	public sealed class Category
 	{
 		internal string CategoryName = "Pipes";
 		public string Name { get { ApiThread.Check(); return CategoryName; } }
+		public ElementId Id { get { ApiThread.Check(); return new ElementId(-2008044); } }
 	}
 	public class Element
 	{
@@ -35,11 +37,14 @@ namespace Autodesk.Revit.DB
 	{
 		internal string ViewName = "Level 1";
 		public string Name { get { ApiThread.Check(); return ViewName; } }
+		public ViewType ViewType { get { ApiThread.Check(); return ViewType.ThreeD; } }
 	}
+	public enum ViewType { ThreeD }
 	public sealed class Application
 	{
 		internal string User = "Telemetry test";
 		public string Username { get { ApiThread.Check(); return User; } }
+		public string VersionNumber { get { ApiThread.Check(); return "2026"; } }
 	}
 	public sealed class Document
 	{
@@ -71,7 +76,7 @@ namespace Autodesk.Revit.DB
 
 namespace Autodesk.Revit.DB.Events
 {
-	public enum UndoOperation { TransactionCommitted, TransactionUndone, TransactionRedone }
+	public enum UndoOperation { TransactionCommitted, TransactionUndone, TransactionRedone, TransactionRolledBack, TransactionGroupRolledBack }
 	public sealed class DocumentChangedEventArgs : EventArgs
 	{
 		internal Document Document;
@@ -85,6 +90,29 @@ namespace Autodesk.Revit.DB.Events
 		public ICollection<ElementId> GetAddedElementIds() { ApiThread.Check(); return Added; }
 		public ICollection<ElementId> GetDeletedElementIds() { ApiThread.Check(); return Deleted; }
 		public ICollection<ElementId> GetModifiedElementIds() { ApiThread.Check(); return Modified; }
-		public ICollection<string> GetTransactionNames() { ApiThread.Check(); return Names; }
+		public IList<string> GetTransactionNames() { ApiThread.Check(); return Names; }
+	}
+}
+
+namespace Autodesk.Revit.UI
+{
+	public enum Result { Succeeded, Failed, Cancelled }
+	public sealed class ExternalCommandData
+	{
+		public UIApplication Application { get; set; } = new UIApplication();
+	}
+	public sealed class UIApplication
+	{
+		public UIDocument ActiveUIDocument { get; set; } = new UIDocument();
+	}
+	public sealed class UIDocument
+	{
+		public Autodesk.Revit.DB.Document Document { get; set; } = new Autodesk.Revit.DB.Document();
+		public Selection Selection { get; set; } = new Selection();
+	}
+	public sealed class Selection
+	{
+		internal readonly List<Autodesk.Revit.DB.ElementId> Ids = new List<Autodesk.Revit.DB.ElementId>();
+		public ICollection<Autodesk.Revit.DB.ElementId> GetElementIds() { Autodesk.Revit.DB.ApiThread.Check(); return Ids; }
 	}
 }
