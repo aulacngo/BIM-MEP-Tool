@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="XYZ.cs" />
+    <Compile Include="../../../src/net48/BIN/FlexAvoidMath.cs" Link="FlexAvoidMath.cs" />
+    <Compile Include="../../../src/net48/BIN/AvoidMepWindow.cs" Link="AvoidMepWindow.cs" />
+  </ItemGroup>
+</Project>

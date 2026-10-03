@@ -5,18 +5,26 @@ namespace BIN;
 
 public class AvoidMep_ObstacleFilter : ISelectionFilter
 {
-	public bool AllowElement(Element elem)
-	{
-		if (elem.Category == null)
-		{
-			return false;
-		}
-		int categoryId = elem.Category.Id.IntegerValue;
-		return categoryId == -2008044 || categoryId == -2008000 || categoryId == -2008020 || categoryId == -2008130 || categoryId == -2008049 || categoryId == -2008010 || categoryId == -2008126;
-	}
+    private readonly Document _document;
+    public AvoidMep_ObstacleFilter(Document document) { _document = document; }
 
-	public bool AllowReference(Reference reference, XYZ position)
-	{
-		return true;
-	}
+    public bool AllowElement(Element element)
+        => element is RevitLinkInstance link ? link.GetLinkDocument() != null : IsObstacle(element);
+
+    public bool AllowReference(Reference reference, XYZ position)
+    {
+        if (reference == null) return false;
+        if (reference.LinkedElementId != null && !ElementId.InvalidElementId.Equals(reference.LinkedElementId))
+        {
+            var link = _document.GetElement(reference.ElementId) as RevitLinkInstance;
+            return IsObstacle(link?.GetLinkDocument()?.GetElement(reference.LinkedElementId));
+        }
+        return IsObstacle(_document.GetElement(reference.ElementId));
+    }
+
+    // Solid extraction subsequently requires closed 3D geometry. Annotation,
+    // datum, links themselves and element types are not physical obstacles.
+    internal static bool IsObstacle(Element element)
+        => element != null && !(element is RevitLinkInstance) && !(element is ElementType)
+            && !element.ViewSpecific && element.Category?.CategoryType == CategoryType.Model;
 }

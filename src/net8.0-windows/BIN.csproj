@@ -39,7 +39,6 @@
     <None Remove="61.-20check-20connected-20pipe\checkconnectedpipewindow.baml" />
     <None Remove="27.-20draw-20clean-20out\drawcleanoutwindow.baml" />
     <None Remove="22.-20copy-20view\copyviewwindow.baml" />
-    <None Remove="58.-20flex-20duct-20avoid-20mep\avoidmepwindow.baml" />
     <None Remove="28.-20place-20support\placesupportwindow.baml" />
     <None Remove="18.-20remove-20pipe-20coupling\removepipecouplingwindow.baml" />
     <None Remove="12.-20sheet-20from-20excel\sheetfromexcelview.baml" />
@@ -85,7 +84,6 @@
     <EmbeddedResource Include="61.-20check-20connected-20pipe\checkconnectedpipewindow.baml" LogicalName="61.%20check%20connected%20pipe/checkconnectedpipewindow.baml" />
     <EmbeddedResource Include="27.-20draw-20clean-20out\drawcleanoutwindow.baml" LogicalName="27.%20draw%20clean%20out/drawcleanoutwindow.baml" />
     <EmbeddedResource Include="22.-20copy-20view\copyviewwindow.baml" LogicalName="22.%20copy%20view/copyviewwindow.baml" />
-    <EmbeddedResource Include="58.-20flex-20duct-20avoid-20mep\avoidmepwindow.baml" LogicalName="58.%20flex%20duct%20avoid%20mep/avoidmepwindow.baml" />
     <EmbeddedResource Include="28.-20place-20support\placesupportwindow.baml" LogicalName="28.%20place%20support/placesupportwindow.baml" />
     <EmbeddedResource Include="18.-20remove-20pipe-20coupling\removepipecouplingwindow.baml" LogicalName="18.%20remove%20pipe%20coupling/removepipecouplingwindow.baml" />
     <EmbeddedResource Include="12.-20sheet-20from-20excel\sheetfromexcelview.baml" LogicalName="12.%20sheet%20from%20excel/sheetfromexcelview.baml" />
