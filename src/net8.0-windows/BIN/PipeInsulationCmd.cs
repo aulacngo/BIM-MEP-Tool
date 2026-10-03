@@ -43,21 +43,19 @@ public class PipeInsulationCmd : IExternalCommand
                 return Result.Cancelled;
             }
 
-            ElementId insulationTypeId = ui.SelectedInsulationType == null
-                ? null
-                : ui.SelectedInsulationType.Tag as ElementId;
-            if (insulationTypeId == null)
+            bool isDuct = ui.SelectedMepTarget == MepTargetKind.Duct;
+            if (GetDefaultInsulationTypeId(doc, isDuct) == null)
             {
                 string targetLabel = ui.SelectedMepTarget == MepTargetKind.Duct ? "Duct" : "Pipe";
                 TaskDialog.Show(
                     "BIM | Pipe & Duct Insulation",
-                    "Chưa chọn " + targetLabel + " Insulation Type hợp lệ. Vui lòng load type tương ứng vào dự án.");
+                    "Không có " + targetLabel + " Insulation Type hợp lệ. Vui lòng load type tương ứng vào dự án.");
                 return Result.Cancelled;
             }
 
             return ui.SelectedMepTarget == MepTargetKind.Duct
-                ? ApplyDuctInsulation(uidoc, doc, ui, insulationTypeId)
-                : ApplyPipeInsulation(uidoc, doc, ui, insulationTypeId);
+                ? ApplyDuctInsulation(uidoc, doc, ui)
+                : ApplyPipeInsulation(uidoc, doc, ui);
         }
         catch (Autodesk.Revit.Exceptions.OperationCanceledException)
         {
@@ -74,8 +72,7 @@ public class PipeInsulationCmd : IExternalCommand
     private static Result ApplyPipeInsulation(
         UIDocument uidoc,
         Document doc,
-        PipeInsulationWindow ui,
-        ElementId insulationTypeId)
+        PipeInsulationWindow ui)
     {
         List<Element> pipeElements;
         List<Element> fittingElements;
@@ -135,7 +132,7 @@ public class PipeInsulationCmd : IExternalCommand
                         continue;
                     }
 
-                    ElementId typeId = ResolveInsulationType(doc, matchingRule.InsulationTypeName, false) ?? insulationTypeId;
+                    ElementId typeId = ResolveInsulationType(doc, matchingRule.InsulationTypeName, false) ?? GetDefaultInsulationTypeId(doc, false);
                     int removedForHost;
                     if (TryReplacePipeInsulation(
                         doc,
@@ -164,7 +161,7 @@ public class PipeInsulationCmd : IExternalCommand
                         continue;
                     }
 
-                    ElementId typeId = ResolveInsulationType(doc, matchingRule.InsulationTypeName, false) ?? insulationTypeId;
+                    ElementId typeId = ResolveInsulationType(doc, matchingRule.InsulationTypeName, false) ?? GetDefaultInsulationTypeId(doc, false);
                     int removedForHost;
                     if (TryReplacePipeInsulation(
                         doc,
@@ -203,8 +200,7 @@ public class PipeInsulationCmd : IExternalCommand
     private static Result ApplyDuctInsulation(
         UIDocument uidoc,
         Document doc,
-        PipeInsulationWindow ui,
-        ElementId insulationTypeId)
+        PipeInsulationWindow ui)
     {
         List<Element> ductElements;
         List<Element> fittingElements;
@@ -263,7 +259,7 @@ public class PipeInsulationCmd : IExternalCommand
                         continue;
                     }
 
-                    ElementId typeId = ResolveInsulationType(doc, matchingRule.InsulationTypeName, true) ?? insulationTypeId;
+                    ElementId typeId = ResolveInsulationType(doc, matchingRule.InsulationTypeName, true) ?? GetDefaultInsulationTypeId(doc, true);
                     int removedForHost;
                     if (TryReplaceDuctInsulation(
                         doc,
@@ -292,7 +288,7 @@ public class PipeInsulationCmd : IExternalCommand
                         continue;
                     }
 
-                    ElementId typeId = ResolveInsulationType(doc, matchingRule.InsulationTypeName, true) ?? insulationTypeId;
+                    ElementId typeId = ResolveInsulationType(doc, matchingRule.InsulationTypeName, true) ?? GetDefaultInsulationTypeId(doc, true);
                     int removedForHost;
                     if (TryReplaceDuctInsulation(
                         doc,
@@ -328,6 +324,15 @@ public class PipeInsulationCmd : IExternalCommand
         return Result.Succeeded;
     }
 
+    private static ElementId GetDefaultInsulationTypeId(Document doc, bool isDuct)
+    {
+        List<InsulationTypeItem> insulationTypes = isDuct
+            ? GetDuctInsulationTypes(doc)
+            : GetPipeInsulationTypes(doc);
+        InsulationTypeItem defaultType = insulationTypes.FirstOrDefault();
+        return defaultType == null ? null : defaultType.Tag as ElementId;
+    }
+
     private static ElementId ResolveInsulationType(Document doc, string typeName, bool isDuct)
     {
         if (!IsSpecificInsulationTypeName(typeName))
@@ -359,6 +364,10 @@ public class PipeInsulationCmd : IExternalCommand
         out int removedCount)
     {
         removedCount = 0;
+        if (insulationTypeId == null || insulationTypeId == ElementId.InvalidElementId)
+        {
+            return false;
+        }
         using (SubTransaction sub = new SubTransaction(doc))
         {
             try
@@ -407,6 +416,10 @@ public class PipeInsulationCmd : IExternalCommand
         out int removedCount)
     {
         removedCount = 0;
+        if (insulationTypeId == null || insulationTypeId == ElementId.InvalidElementId)
+        {
+            return false;
+        }
         using (SubTransaction sub = new SubTransaction(doc))
         {
             try

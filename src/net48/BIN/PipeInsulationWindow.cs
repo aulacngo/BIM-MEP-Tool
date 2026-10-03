@@ -49,7 +49,6 @@ internal sealed class PipeInsulationPresetItem
 public sealed class PipeInsulationWindow : Window
 {
     private const string EmptySystemTypeMessage = "Không có hệ thống nào trong view";
-    private const string RuleInsulationTypeDefault = "(Theo loại chính)";
     private static readonly string SettingsDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "BIN_PipeInsulation");
@@ -57,7 +56,6 @@ public sealed class PipeInsulationWindow : Window
     private static readonly string DuctPresetFileName = Path.Combine(SettingsDirectory, "duct-presets.json");
     private static readonly string LegacyRulesFileName = Path.Combine(SettingsDirectory, "system_rules.json");
 
-    private readonly ComboBox insulationTypeComboBox;
     private readonly ComboBox systemTypeComboBox;
     private readonly ComboBox presetComboBox;
     private readonly RadioButton pipeModeRadioButton;
@@ -83,7 +81,6 @@ public sealed class PipeInsulationWindow : Window
     private bool isLoadingPreset;
 
     public ObservableCollection<PipeInsulationRule> Rules { get; private set; }
-    public InsulationTypeItem SelectedInsulationType { get; private set; }
     public bool RemoveExisting { get; private set; }
     public bool SmoothTees { get; private set; }
     public PipeInsulationScope SelectedScope { get; private set; }
@@ -165,38 +162,34 @@ public sealed class PipeInsulationWindow : Window
         topBar.Children.Add(targetModeBar);
         removeExistingCheckBox = new CheckBox
         {
-            Content = "Thay thế insulation hiện có trong phạm vi",
+            Content = new TextBlock
+            {
+                Text = "Thay thế insulation hiện có trong phạm vi",
+                TextWrapping = TextWrapping.Wrap
+            },
+            Margin = new Thickness(0, 0, 0, 8),
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = new SolidColorBrush(Color.FromRgb(58, 69, 84))
         };
-        topBar.Children.Add(removeExistingCheckBox);
         smoothTeesCheckBox = new CheckBox
         {
-            Content = "Khử khối vuông ở Tê (Làm mượt ngã ba chữ T)",
+            Content = new TextBlock
+            {
+                Text = "Khử khối vuông ở Tê (Làm mượt ngã ba chữ T)",
+                TextWrapping = TextWrapping.Wrap
+            },
             IsChecked = true,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(16, 2, 0, 2),
+            Margin = new Thickness(0, 2, 0, 2),
             ToolTip = "Bỏ qua tạo khối hộp thô của Tê trong Revit để lớp bảo ôn đường tự đâm vào nhau trơn láng, tự nhiên."
         };
-        topBar.Children.Add(smoothTeesCheckBox);
         Grid.SetColumnSpan(topBar, 3);
         setupGrid.Children.Add(topBar);
 
         StackPanel materialPanel = new StackPanel();
         materialPanel.Children.Add(CreateSectionTitle("Thiết lập insulation"));
-        materialPanel.Children.Add(CreateFieldLabel("Loại insulation"));
-        insulationTypeComboBox = new ComboBox
-        {
-            MinHeight = 32,
-            ItemsSource = this.pipeInsulationTypes,
-            DisplayMemberPath = "Name",
-            Margin = new Thickness(0, 0, 0, 10)
-        };
-        if (insulationTypeComboBox.Items.Count > 0)
-        {
-            insulationTypeComboBox.SelectedIndex = 0;
-        }
-        materialPanel.Children.Add(insulationTypeComboBox);
+        materialPanel.Children.Add(removeExistingCheckBox);
+        materialPanel.Children.Add(smoothTeesCheckBox);
         Grid.SetRow(materialPanel, 1);
         Grid.SetColumn(materialPanel, 0);
         setupGrid.Children.Add(materialPanel);
@@ -487,13 +480,12 @@ public sealed class PipeInsulationWindow : Window
         IEnumerable<InsulationTypeItem> types = targetKind == MepTargetKind.Duct
             ? ductInsulationTypes
             : pipeInsulationTypes;
-        List<string> options = new List<string> { RuleInsulationTypeDefault };
-        options.AddRange(types
+        return types
             .Where(type => type != null && !string.IsNullOrWhiteSpace(type.Name))
             .Select(type => type.Name)
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase));
-        return options;
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static DataGridTextColumn CreateTextColumn(string header, string propertyName, double starWidth)
@@ -518,8 +510,6 @@ public sealed class PipeInsulationWindow : Window
         Title = isDuct ? "BIM | Duct Insulation" : "BIM | Pipe Insulation";
 
         isLoadingPreset = true;
-        insulationTypeComboBox.ItemsSource = isDuct ? ductInsulationTypes : pipeInsulationTypes;
-        insulationTypeComboBox.SelectedIndex = insulationTypeComboBox.Items.Count > 0 ? 0 : -1;
         if (insulationTypeColumn != null)
         {
             insulationTypeColumn.ItemsSource = GetRuleInsulationTypeOptions(targetKind);
@@ -717,7 +707,7 @@ public sealed class PipeInsulationWindow : Window
             MinDN = 20,
             MaxDN = 40,
             ThicknessMM = 25,
-            InsulationTypeName = RuleInsulationTypeDefault
+            InsulationTypeName = GetRuleInsulationTypeOptions(SelectedMepTarget).FirstOrDefault() ?? string.Empty
         };
         Rules.Add(newRule);
         rulesGrid.SelectedItem = newRule;
@@ -771,15 +761,16 @@ public sealed class PipeInsulationWindow : Window
     {
         SelectedMepTarget = ductModeRadioButton.IsChecked == true ? MepTargetKind.Duct : MepTargetKind.Pipe;
         List<PipeInsulationRule> validRules = GetValidRules();
-        if (insulationTypeComboBox.SelectedItem == null)
-        {
-            MessageBox.Show("Vui lòng chọn Loại insulation.", Title, MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-
         if (validRules.Count == 0)
         {
             MessageBox.Show("Vui lòng nhập ít nhất một rule hợp lệ (DN bắt đầu, DN kết thúc và độ dày phải lớn hơn 0).", Title, MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (validRules.Any(rule => string.IsNullOrWhiteSpace(rule.InsulationTypeName)))
+        {
+            string targetLabel = SelectedMepTarget == MepTargetKind.Duct ? "Duct" : "Pipe";
+            MessageBox.Show("Không có " + targetLabel + " Insulation Type hợp lệ trong dự án. Vui lòng load type tương ứng.", Title, MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -806,7 +797,6 @@ public sealed class PipeInsulationWindow : Window
             return;
         }
 
-        SelectedInsulationType = insulationTypeComboBox.SelectedItem as InsulationTypeItem;
         RemoveExisting = removeExistingCheckBox.IsChecked == true;
         SmoothTees = smoothTeesCheckBox.IsChecked == true;
         SelectedPresetName = (presetComboBox.SelectedItem as PipeInsulationPresetItem)?.DisplayName ?? "Tùy chỉnh";
@@ -819,7 +809,16 @@ public sealed class PipeInsulationWindow : Window
     private List<PipeInsulationRule> GetValidRules()
     {
         CommitGridEdits();
-        return Rules.Where(IsValidRule).Select(CloneRule).ToList();
+        List<string> availableTypeNames = GetRuleInsulationTypeOptions(SelectedMepTarget);
+        List<PipeInsulationRule> validRules = Rules.Where(IsValidRule).Select(CloneRule).ToList();
+        foreach (PipeInsulationRule rule in validRules)
+        {
+            // Persist an actual document type, including for legacy presets and new rows.
+            rule.InsulationTypeName = availableTypeNames.FirstOrDefault(name =>
+                string.Equals(name, rule.InsulationTypeName, StringComparison.OrdinalIgnoreCase))
+                ?? availableTypeNames.FirstOrDefault() ?? string.Empty;
+        }
+        return validRules;
     }
 
     private void CommitGridEdits()
@@ -846,6 +845,7 @@ public sealed class PipeInsulationWindow : Window
         List<InsulationTypeItem> types = availableTypes
             .Where(type => type != null && !string.IsNullOrWhiteSpace(type.Name))
             .ToList();
+        string defaultTypeName = GetRuleInsulationTypeOptions(SelectedMepTarget).FirstOrDefault() ?? string.Empty;
 
         foreach (PipeInsulationRule rule in Rules)
         {
@@ -854,17 +854,20 @@ public sealed class PipeInsulationWindow : Window
                 continue;
             }
 
-            InsulationTypeItem matchingType = types.FirstOrDefault(type =>
+            List<InsulationTypeItem> matchingTypes = types.Where(type =>
                 PipeInsulationRules.Matches(type.Name, rule.System) &&
-                InsulationTypeContainsThickness(type.Name, rule.ThicknessMM));
-            rule.InsulationTypeName = matchingType == null ? RuleInsulationTypeDefault : matchingType.Name;
+                InsulationTypeContainsThickness(type.Name, rule.ThicknessMM)).Take(2).ToList();
+            // Smart matching is only authoritative when there is one candidate.
+            rule.InsulationTypeName = matchingTypes.Count == 1
+                ? matchingTypes[0].Name
+                : defaultTypeName;
         }
     }
 
     private static bool IsDefaultInsulationTypeName(string typeName)
     {
         return string.IsNullOrWhiteSpace(typeName) ||
-               string.Equals(typeName, RuleInsulationTypeDefault, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(typeName, "(Theo loại chính)", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(typeName, "(Mặc định)", StringComparison.OrdinalIgnoreCase);
     }
 
